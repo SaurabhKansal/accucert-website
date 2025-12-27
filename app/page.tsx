@@ -1,65 +1,244 @@
-import Image from "next/image";
+import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="bg-white text-slate-900">
+
+      {/* HEADER */}
+      <header className="border-b bg-white">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <img src="/logo.jpeg" alt="Accucert" className="h-8 w-auto" />
+
+          <nav className="hidden md:flex gap-8 text-sm font-medium text-slate-700">
+            <a href="#services" className="hover:text-green-600">Services</a>
+            <a href="#how-it-works" className="hover:text-green-600">How It Works</a>
+            <a href="#contact" className="hover:text-green-600">Contact</a>
+          </nav>
+
+          <Link
+            href="/upload"
+            className="bg-green-600 text-white px-5 py-2 rounded-md text-sm hover:bg-green-700"
+          >
+            Get Started
+          </Link>
+        </div>
+      </header>
+
+      {/* HERO */}
+      <section className="bg-gradient-to-b from-green-100 to-white">
+        <div className="max-w-7xl mx-auto px-6 py-24 grid md:grid-cols-2 gap-16 items-center">
+
+          {/* LEFT */}
+          <div>
+            <span className="inline-block bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full mb-6">
+              Trusted by 10,000+ Clients Worldwide
+            </span>
+
+            <h1 className="text-5xl font-bold leading-tight mb-6">
+              Official Document{" "}
+              <span className="text-green-600">Translation</span>
+              <br />
+              You Can Trust
+            </h1>
+
+            <p className="text-gray-600 mb-8 max-w-xl">
+              Get certified translations for visas, court submissions, birth
+              certificates, and all official documents. Fast, accurate, and
+              legally recognized.
+            </p>
+
+            <div className="flex gap-4 mb-6">
+              <Link
+                href="/upload"
+                className="bg-green-600 text-white px-6 py-3 rounded-md hover:bg-green-700"
+              >
+                Upload Document
+              </Link>
+              <Link
+                href="/pricing"
+                className="border border-gray-300 px-6 py-3 rounded-md hover:bg-gray-50"
+              >
+                View Pricing
+              </Link>
+            </div>
+
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              ⭐⭐⭐⭐⭐ <span>4.9/5 from 2,300+ reviews</span>
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div className="bg-white rounded-2xl shadow-lg p-6">
+            <div className="bg-green-100 rounded-xl p-16 flex flex-col items-center justify-center text-center">
+              <svg
+                className="w-16 h-16 text-green-600 mb-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M7 2h8l4 4v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
+              </svg>
+              <p className="font-medium">
+                Professional Certified Translations
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 text-center mt-6 text-sm">
+              <div>
+                <div className="text-xl font-semibold">50+</div>
+                <div className="text-gray-500">Languages</div>
+              </div>
+              <div>
+                <div className="text-xl font-semibold">24h</div>
+                <div className="text-gray-500">Turnaround</div>
+              </div>
+              <div>
+                <div className="text-xl font-semibold">100%</div>
+                <div className="text-gray-500">Certified</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* DOCUMENT TYPES */}
+      <section id="services" className="bg-gradient-to-b from-white to-green-50 py-24">
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <span className="inline-block bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full mb-4">
+            Document Types
+          </span>
+
+          <h2 className="text-4xl font-bold mb-4">
+            Documents We <span className="text-green-600">Translate</span>
+          </h2>
+
+          <p className="text-gray-600 max-w-2xl mx-auto mb-16">
+            Specialized in official and legal documents with certified translations
+            accepted worldwide.
           </p>
+
+          <div className="grid md:grid-cols-3 gap-8 text-left">
+            {[
+              ["Visa Documents", "Certified translations for visa and immigration paperwork."],
+              ["Birth Certificates", "Accurate translations for legal and official purposes."],
+              ["Court Submissions", "Professional translations for court proceedings."],
+              ["Academic Records", "Diplomas and transcripts translated with precision."],
+              ["Marriage Certificates", "Certified family and marital documents."],
+              ["Business Documents", "Contracts and corporate paperwork."],
+            ].map(([title, desc]) => (
+              <div
+                key={title}
+                className="bg-white rounded-xl p-6 shadow-sm border hover:shadow-md transition"
+              >
+                <h3 className="font-semibold mb-2">{title}</h3>
+                <p className="text-sm text-gray-600">{desc}</p>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section id="how-it-works" className="py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <span className="inline-block bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full mb-4">
+            Simple Process
+          </span>
+
+          <h2 className="text-4xl font-bold mb-4">
+            How It <span className="text-green-600">Works</span>
+          </h2>
+
+          <p className="text-gray-600 mb-16">
+            Get your certified translation in three simple steps
+          </p>
+
+          <div className="grid md:grid-cols-3 gap-12">
+            {[
+              ["01", "Upload Document", "Upload your document securely through our platform"],
+              ["02", "Expert Translation", "Certified translators work on your document"],
+              ["03", "Receive & Use", "Get your certified translation ready for submission"],
+            ].map(([num, title, desc]) => (
+              <div key={num}>
+                <div className="text-6xl font-bold text-green-100 mb-4">{num}</div>
+                <h3 className="font-semibold mb-2">{title}</h3>
+                <p className="text-gray-600">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="bg-green-600 py-24">
+        <div className="max-w-3xl mx-auto px-6 text-center text-white">
+          <h2 className="text-4xl font-bold mb-4">
+            Ready to Get Started?
+          </h2>
+          <p className="mb-8">
+            Upload your document now and receive a free quote within minutes.
+            No commitment required.
+          </p>
+
+          <div className="flex justify-center gap-4">
+            <input
+              placeholder="Enter your email"
+              className="px-4 py-3 rounded-md text-black w-64"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <button className="bg-white text-green-700 px-6 py-3 rounded-md font-medium">
+              Get Quote
+            </button>
+          </div>
         </div>
-      </main>
-    </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="border-t bg-white">
+        <div className="max-w-7xl mx-auto px-6 py-12 grid md:grid-cols-4 gap-8 text-sm">
+          <div>
+            <img src="/logo.jpeg" className="h-7 mb-3" />
+            <p className="text-gray-600">
+              Professional certified translations for official documents worldwide.
+            </p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold mb-2">Services</h4>
+            <ul className="space-y-1 text-gray-600">
+              <li>Visa Documents</li>
+              <li>Birth Certificates</li>
+              <li>Court Submissions</li>
+              <li>Academic Records</li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold mb-2">Company</h4>
+            <ul className="space-y-1 text-gray-600">
+              <li>About Us</li>
+              <li>Pricing</li>
+              <li>Contact</li>
+              <li>FAQ</li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold mb-2">Legal</h4>
+            <ul className="space-y-1 text-gray-600">
+              <li>Privacy Policy</li>
+              <li>Terms of Service</li>
+              <li>Certification</li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="text-center text-xs text-gray-500 pb-6">
+          © 2025 Accucert. All rights reserved.
+        </div>
+      </footer>
+
+    </main>
   );
 }
