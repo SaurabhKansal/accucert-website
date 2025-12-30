@@ -2,22 +2,22 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <main className="bg-white text-slate-900">
+    <main className="bg-slate-50 text-slate-800">
 
       {/* HEADER */}
-      <header className="bg-slate-950 border-b border-slate-800">
+      <header className="bg-slate-900 border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <img src="/logo.jpeg" alt="Accucert" className="h-8 w-auto" />
 
-          <nav className="hidden md:flex gap-8 text-sm font-medium text-slate-300">
-            <a href="#services" className="hover:text-lime-400">Services</a>
-            <a href="#how-it-works" className="hover:text-lime-400">How It Works</a>
-            <a href="#contact" className="hover:text-lime-400">Contact</a>
+          <nav className="hidden md:flex gap-8 text-sm font-medium text-slate-200">
+            <a href="#services" className="hover:text-green-400 transition">Services</a>
+            <a href="#how-it-works" className="hover:text-green-400 transition">How It Works</a>
+            <a href="#contact" className="hover:text-green-400 transition">Contact</a>
           </nav>
 
           <Link
             href="/upload"
-            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-md text-sm"
+            className="bg-orange-500 hover:bg-green-600 transition text-white px-5 py-2 rounded-md text-sm"
           >
             Get Started
           </Link>
@@ -25,18 +25,18 @@ export default function Home() {
       </header>
 
       {/* HERO */}
-      <section className="bg-slate-950 text-white">
+      <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100">
         <div className="max-w-7xl mx-auto px-6 py-28 grid md:grid-cols-2 gap-16 items-center">
 
           {/* LEFT */}
           <div>
-            <span className="inline-block bg-slate-800 text-lime-400 text-xs font-medium px-3 py-1 rounded-full mb-6">
+            <span className="inline-block bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full mb-6">
               Trusted by 10,000+ Clients Worldwide
             </span>
 
-            <h1 className="text-5xl font-bold leading-tight mb-6">
+            <h1 className="text-5xl font-bold leading-tight mb-6 text-white">
               Official Document{" "}
-              <span className="text-green-600">Translation</span>
+              <span className="text-orange-400">Translation</span>
               <br />
               You Can Trust
             </h1>
@@ -50,13 +50,13 @@ export default function Home() {
             <div className="flex gap-4 mb-6">
               <Link
                 href="/upload"
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-md"
+                className="bg-orange-500 hover:bg-green-600 transition text-white px-6 py-3 rounded-md"
               >
                 Upload Document
               </Link>
               <Link
                 href="/pricing"
-                className="border border-slate-600 text-slate-200 px-6 py-3 rounded-md hover:bg-slate-800"
+                className="border border-slate-500 text-slate-200 px-6 py-3 rounded-md hover:border-green-400 hover:text-green-400 transition"
               >
                 View Pricing
               </Link>
@@ -68,8 +68,8 @@ export default function Home() {
           </div>
 
           {/* RIGHT */}
-          <div className="bg-white rounded-2xl shadow-xl p-6 text-slate-900">
-            <div className="bg-slate-100 rounded-xl p-16 flex flex-col items-center justify-center text-center">
+          <div className="bg-slate-100 rounded-2xl shadow-lg p-6 text-slate-800">
+            <div className="bg-orange-50 rounded-xl p-16 flex flex-col items-center justify-center text-center">
               <svg
                 className="w-16 h-16 text-green-600 mb-4"
                 fill="none"
@@ -104,16 +104,16 @@ export default function Home() {
       </section>
 
       {/* DOCUMENT TYPES */}
-      <section id="services" className="bg-slate-50 py-24">
+      <section id="services" className="bg-white py-24">
         <div className="max-w-7xl mx-auto px-6 text-center">
 
-          <div className="w-16 h-1 bg-orange-500 mx-auto mb-6 rounded-full" />
+          <div className="w-20 h-1 bg-orange-400 mx-auto mb-6 rounded-full" />
 
           <h2 className="text-4xl font-bold mb-4">
             Documents We <span className="text-green-600">Translate</span>
           </h2>
 
-          <p className="text-gray-600 max-w-2xl mx-auto mb-16">
+          <p className="text-slate-600 max-w-2xl mx-auto mb-16">
             Specialising in official and legal documents accepted worldwide.
           </p>
 
@@ -128,10 +128,10 @@ export default function Home() {
             ].map(([title, desc]) => (
               <div
                 key={title}
-                className="bg-white rounded-xl p-6 border border-slate-200 hover:border-green-600 transition"
+                className="bg-slate-50 rounded-xl p-6 border border-slate-200 hover:border-green-400 transition"
               >
                 <h3 className="font-semibold mb-2">{title}</h3>
-                <p className="text-sm text-gray-600">{desc}</p>
+                <p className="text-sm text-slate-600">{desc}</p>
               </div>
             ))}
           </div>
@@ -139,14 +139,14 @@ export default function Home() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section id="how-it-works" className="py-24 bg-white">
+      <section id="how-it-works" className="py-24 bg-slate-50">
         <div className="max-w-7xl mx-auto px-6 text-center">
 
           <h2 className="text-4xl font-bold mb-4">
             How It <span className="text-green-600">Works</span>
           </h2>
 
-          <p className="text-gray-600 mb-16">
+          <p className="text-slate-600 mb-16">
             Three simple steps to your certified translation
           </p>
 
@@ -157,9 +157,9 @@ export default function Home() {
               ["03", "Download & Use", "Receive your certified translation."],
             ].map(([num, title, desc]) => (
               <div key={num}>
-                <div className="text-6xl font-bold text-slate-200 mb-4">{num}</div>
+                <div className="text-6xl font-bold text-orange-100 mb-4">{num}</div>
                 <h3 className="font-semibold mb-2">{title}</h3>
-                <p className="text-gray-600">{desc}</p>
+                <p className="text-slate-600">{desc}</p>
               </div>
             ))}
           </div>
@@ -167,7 +167,7 @@ export default function Home() {
       </section>
 
       {/* CTA */}
-      <section className="bg-gradient-to-r from-green-600 via-lime-500 to-orange-500 py-24">
+      <section className="bg-orange-500 py-24">
         <div className="max-w-3xl mx-auto px-6 text-center text-white">
           <h2 className="text-4xl font-bold mb-4">
             Ready to Get Started?
@@ -178,7 +178,7 @@ export default function Home() {
 
           <Link
             href="/upload"
-            className="inline-block bg-slate-950 hover:bg-slate-900 text-white px-8 py-3 rounded-md font-medium"
+            className="inline-block bg-slate-900 hover:bg-green-600 transition text-white px-8 py-3 rounded-md font-medium"
           >
             Upload Your Document
           </Link>
@@ -186,7 +186,7 @@ export default function Home() {
       </section>
 
       {/* FOOTER */}
-      <footer className="bg-slate-950 text-slate-400 border-t border-slate-800">
+      <footer className="bg-slate-900 text-slate-300 border-t border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-12 grid md:grid-cols-4 gap-8 text-sm">
           <div>
             <img src="/logo.jpeg" className="h-7 mb-3" />
@@ -225,7 +225,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="text-center text-xs text-slate-500 pb-6">
+        <div className="text-center text-xs text-slate-400 pb-6">
           © 2024 Accucert. All rights reserved.
         </div>
       </footer>
