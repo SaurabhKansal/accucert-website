@@ -126,7 +126,7 @@ export default function Home() {
             ].map(([title, desc]) => (
               <div
                 key={title}
-                className="bg-gradient-to-br from-green-50 to-white rounded-xl p-6 border border-slate-200 hover:border-green-400 transition"
+                className="bg-gradient-to-br from-green-100 via-green-50 to-white rounded-xl p-6 border border-slate-200 hover:border-green-400 transition"
               >
                 <h3 className="font-semibold mb-2">{title}</h3>
                 <p className="text-sm text-slate-600">{desc}</p>
