@@ -28,7 +28,6 @@ export default function Home() {
       <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100">
         <div className="max-w-7xl mx-auto px-6 py-28 grid md:grid-cols-2 gap-16 items-center">
 
-          {/* LEFT */}
           <div>
             <span className="inline-block bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full mb-6">
               Trusted by 10,000+ Clients Worldwide
@@ -67,7 +66,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* RIGHT */}
           <div className="bg-slate-100 rounded-2xl shadow-lg p-6 text-slate-800">
             <div className="bg-orange-50 rounded-xl p-16 flex flex-col items-center justify-center text-center">
               <svg
@@ -103,7 +101,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* DOCUMENT TYPES */}
+      {/* DOCUMENT TYPES — GREEN GRADIENT BOXES */}
       <section id="services" className="bg-white py-24">
         <div className="max-w-7xl mx-auto px-6 text-center">
 
@@ -128,7 +126,7 @@ export default function Home() {
             ].map(([title, desc]) => (
               <div
                 key={title}
-                className="bg-slate-50 rounded-xl p-6 border border-slate-200 hover:border-green-400 transition"
+                className="bg-gradient-to-br from-green-50 to-white rounded-xl p-6 border border-slate-200 hover:border-green-400 transition"
               >
                 <h3 className="font-semibold mb-2">{title}</h3>
                 <p className="text-sm text-slate-600">{desc}</p>
@@ -138,7 +136,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* HOW IT WORKS */}
+      {/* HOW IT WORKS — GREEN GRADIENT NUMBERS */}
       <section id="how-it-works" className="py-24 bg-slate-50">
         <div className="max-w-7xl mx-auto px-6 text-center">
 
@@ -157,7 +155,9 @@ export default function Home() {
               ["03", "Download & Use", "Receive your certified translation."],
             ].map(([num, title, desc]) => (
               <div key={num}>
-                <div className="text-6xl font-bold text-orange-100 mb-4">{num}</div>
+                <div className="text-6xl font-bold bg-gradient-to-b from-green-600 to-green-300 bg-clip-text text-transparent mb-4">
+                  {num}
+                </div>
                 <h3 className="font-semibold mb-2">{title}</h3>
                 <p className="text-slate-600">{desc}</p>
               </div>
@@ -166,7 +166,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA */}
+      {/* CTA — GREEN BUTTON → BLUE ON HOVER */}
       <section className="bg-orange-500 py-24">
         <div className="max-w-3xl mx-auto px-6 text-center text-white">
           <h2 className="text-4xl font-bold mb-4">
@@ -178,7 +178,7 @@ export default function Home() {
 
           <Link
             href="/upload"
-            className="inline-block bg-slate-900 hover:bg-green-600 transition text-white px-8 py-3 rounded-md font-medium"
+            className="inline-block bg-green-600 hover:bg-slate-900 transition text-white px-8 py-3 rounded-md font-medium"
           >
             Upload Your Document
           </Link>
@@ -190,9 +190,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6 py-12 grid md:grid-cols-4 gap-8 text-sm">
           <div>
             <img src="/logo.jpeg" className="h-7 mb-3" />
-            <p>
-              Certified translations for official documents worldwide.
-            </p>
+            <p>Certified translations for official documents worldwide.</p>
           </div>
 
           <div>
