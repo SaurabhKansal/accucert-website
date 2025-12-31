@@ -1,8 +1,41 @@
 @import "tailwindcss";
 
 /* =========================
-   ACCUCERT BRAND COLORS
+   ACCUCERT THEME SYSTEM
+   Brand Blue = #0f172b
    ========================= */
+
+/* THEME A — BALANCED / DEFAULT */
+:root {
+  --primary: #16a34a;   /* green */
+  --accent: #f97316;    /* orange */
+  --cta-hover: #0f172b; /* brand navy */
+}
+
+/* THEME B — CORPORATE / TRUST (GREEN + ORANGE PRESENT) */
+[data-theme="alt1"] {
+  --primary: #0f172b;   /* brand navy — structure */
+  --accent: #f97316;    /* ORANGE — visible in section dividers & accents */
+  --cta-hover: #16a34a; /* GREEN — hover & interaction */
+}
+
+
+
+/* THEME C — ENERGETIC / B2C */
+[data-theme="alt2"] {
+  --primary: #f97316;   /* orange as primary */
+  --accent: #16a34a;    /* green reassurance */
+  --cta-hover: #0f172b; /* brand navy on hover */
+}
+
+
+
+
+/* =========================
+   ACCUCERT BRAND TOKENS
+   (Internal / future Tailwind use)
+   ========================= */
+
 @layer base {
   :root {
     --accugreen: 111 191 74;
@@ -13,7 +46,8 @@
 
   body {
     @apply bg-white text-gray-900;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-      "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: ui-sans-serif, system-ui, -apple-system,
+      BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+      Arial, sans-serif;
   }
 }
