@@ -5,8 +5,6 @@ import { useState } from "react";
 
 export default function Home() {
   const [theme, setTheme] = useState("default");
-
-  // Theme A + C = light hero, Theme B = dark hero
   const isLightHero = theme === "default" || theme === "alt2";
 
   return (
@@ -43,15 +41,8 @@ export default function Home() {
       <section className={isLightHero ? "bg-white" : "bg-slate-900"}>
         <div className="max-w-7xl mx-auto px-6 py-28 grid md:grid-cols-2 gap-16 items-center">
 
-          {/* LEFT */}
           <div>
-            <span
-              className={`inline-block text-xs font-medium px-3 py-1 rounded-full mb-6 ${
-                theme === "alt1" || theme === "default"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-[var(--primary)]/15 text-[var(--primary)]"
-              }`}
-            >
+            <span className="inline-block bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full mb-6">
               Trusted by 10,000+ Clients Worldwide
             </span>
 
@@ -63,48 +54,20 @@ export default function Home() {
             </h1>
 
             <p className={`mb-8 max-w-xl ${isLightHero ? "text-slate-600" : "text-slate-300"}`}>
-              Certified translations for visas, court submissions, birth
-              certificates, and official documents. Accurate, secure, and
-              legally recognised.
+              Certified translations for visas, court submissions, birth certificates,
+              and official documents. Accurate, secure, and legally recognised.
             </p>
 
-            <div className="flex gap-4 mb-6">
-              <Link
-                href="/upload"
-                className="bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white px-6 py-3 rounded-md"
-              >
-                Upload Document
-              </Link>
-
-              <Link
-                href="/pricing"
-                className={`border px-6 py-3 rounded-md transition ${
-                  isLightHero
-                    ? "border-slate-300 text-slate-700 hover:border-[var(--cta-hover)] hover:text-[var(--cta-hover)]"
-                    : "border-slate-500 text-slate-200 hover:border-[var(--cta-hover)] hover:text-[var(--cta-hover)]"
-                }`}
-              >
-                View Pricing
-              </Link>
-            </div>
-
-            <div className="text-sm text-slate-400">
-              ⭐⭐⭐⭐⭐ 4.9/5 from 2,300+ reviews
-            </div>
+            <Link
+              href="/upload"
+              className="bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white px-6 py-3 rounded-md"
+            >
+              Upload Document
+            </Link>
           </div>
 
-          {/* RIGHT — DOCUMENT ICON */}
           <div className="bg-slate-100 rounded-2xl shadow-lg p-6 text-slate-800">
-            <div className="bg-[var(--accent)]/10 rounded-xl p-16 flex flex-col items-center justify-center text-center">
-              <svg
-                className="w-16 h-16 text-[var(--primary)] mb-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <path d="M7 2h8l4 4v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
-              </svg>
+            <div className="bg-[var(--accent)]/10 rounded-xl p-16 text-center">
               <p className="font-semibold">Professional Certified Translations</p>
             </div>
           </div>
@@ -112,8 +75,47 @@ export default function Home() {
         </div>
       </section>
 
+      {/* FILE UPLOAD — FIXED */}
+      <section className="max-w-xl mx-auto mt-24 p-8 border rounded-lg bg-white">
+        <input
+          type="file"
+          accept="application/pdf,image/*"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            const formData = new FormData();
+
+            // ✅ CRITICAL FIX
+            formData.append("file", file, file.name);
+
+            const res = await fetch("/api/upload", {
+              method: "POST",
+              body: formData,
+            });
+
+            if (!res.ok) {
+              alert("Upload failed");
+              return;
+            }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `certified-${file.name}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+
+            URL.revokeObjectURL(url);
+          }}
+        />
+      </section>
+
       {/* DOCUMENT TYPES */}
-      <section id="services" className="bg-white py-24">
+      <section id="services" className="bg-white py-24 mt-32">
         <div className="max-w-7xl mx-auto px-6 text-center">
           <div className="w-20 h-1 bg-[var(--accent)] mx-auto mb-6 rounded-full" />
 
@@ -133,13 +135,15 @@ export default function Home() {
               "Academic Records",
               "Marriage Certificates",
               "Business Documents",
-            ].map(title => (
+            ].map((title) => (
               <div
                 key={title}
-                className="bg-gradient-to-br from-[var(--accent)]/30 to-white rounded-xl p-6 border border-slate-200 hover:border-[var(--cta-hover)] transition"
+                className="bg-gradient-to-br from-[var(--accent)]/20 to-white rounded-xl p-6 border border-slate-200"
               >
                 <h3 className="font-semibold mb-2">{title}</h3>
-                <p className="text-sm text-slate-600">Certified translation services.</p>
+                <p className="text-sm text-slate-600">
+                  Certified translation services.
+                </p>
               </div>
             ))}
           </div>
@@ -187,40 +191,11 @@ export default function Home() {
       </section>
 
       {/* FOOTER */}
-      <footer className="bg-slate-900 text-slate-300 border-t border-slate-700">
+      <footer className="bg-slate-900 text-slate-300 border-t border-slate-700 mt-32">
         <div className="max-w-7xl mx-auto px-6 py-12 grid md:grid-cols-4 gap-8 text-sm">
           <div>
             <img src="/logo.jpeg" className="h-7 mb-3" />
             <p>Certified translations for official documents worldwide.</p>
-          </div>
-
-          <div>
-            <h4 className="font-semibold text-white mb-2">Services</h4>
-            <ul className="space-y-1">
-              <li>Visa Documents</li>
-              <li>Birth Certificates</li>
-              <li>Court Submissions</li>
-              <li>Academic Records</li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold text-white mb-2">Company</h4>
-            <ul className="space-y-1">
-              <li>About</li>
-              <li>Pricing</li>
-              <li>Contact</li>
-              <li>FAQ</li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold text-white mb-2">Legal</h4>
-            <ul className="space-y-1">
-              <li>Privacy Policy</li>
-              <li>Terms of Service</li>
-              <li>Certification</li>
-            </ul>
           </div>
         </div>
 
