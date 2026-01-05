@@ -1,10 +1,11 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
-  // 1. Opt-out of bundling for ALL related packages
+  // 1. Keep these as external so they are not bundled into a single broken file
   serverExternalPackages: [
     "tesseract.js",
-    "tesseract.js-core", // ✅ Added this
+    "tesseract.js-core",
     "tesseract-wasm",
     "bmp-js",
     "pako",
@@ -12,17 +13,18 @@ const nextConfig: NextConfig = {
     "sharp"
   ],
 
+  // 2. Force Vercel to physically copy these folders to the server
   outputFileTracingIncludes: {
     "/**/*": [
-      "./node_modules/tesseract.js/**/*",
-      "./node_modules/tesseract.js-core/**/*", // ✅ Crucial: Includes SIMD and standard cores
-      "./node_modules/tesseract-wasm/**/*",
-      "./node_modules/bmp-js/**/*",
-      "./node_modules/pako/**/*",
-      "./node_modules/wasm-feature-detect/**/*",
-      "./node_modules/sharp/**/*",
-      "./eng.traineddata",
-      "./public/**/*",
+      path.join(process.cwd(), "node_modules/tesseract.js/**/*"),
+      path.join(process.cwd(), "node_modules/tesseract.js-core/**/*"),
+      path.join(process.cwd(), "node_modules/tesseract-wasm/**/*"),
+      path.join(process.cwd(), "node_modules/bmp-js/**/*"),
+      path.join(process.cwd(), "node_modules/pako/**/*"),
+      path.join(process.cwd(), "node_modules/wasm-feature-detect/**/*"),
+      path.join(process.cwd(), "node_modules/sharp/**/*"),
+      path.join(process.cwd(), "eng.traineddata"),
+      path.join(process.cwd(), "public/**/*"),
     ],
   },
 };

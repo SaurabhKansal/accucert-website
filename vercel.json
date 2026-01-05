@@ -1,0 +1,9 @@
+{
+    "functions": {
+      "app/api/ocr/route.ts": {
+        "includeFiles": "node_modules/tesseract.js-core/**",
+        "memory": 1024,
+        "maxDuration": 60
+      }
+    }
+  }
