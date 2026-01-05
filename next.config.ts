@@ -1,14 +1,14 @@
-// Force update 2
 import type { NextConfig } from "next";
-// ... the rest of your code
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["tesseract.js"],
+  // 1. Keep these as external so their internal structure isn't messed up
+  serverExternalPackages: ["tesseract.js", "tesseract-wasm", "bmp-js"],
   
   outputFileTracingIncludes: {
     "/**/*": [
       "./node_modules/tesseract.js/**/*",
-      "./node_modules/tesseract-wasm/**/*", // Required for the 'corePath' above
+      "./node_modules/tesseract-wasm/**/*",
+      "./node_modules/bmp-js/**/*", // ✅ Add this line
       "./public/**/*",
     ],
   },
