@@ -19,7 +19,7 @@
     "pdfjs-dist": "^5.4.530",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "tesseract.js": "^7.0.0",
+    "tesseract.js": "^5.0.3",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

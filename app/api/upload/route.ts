@@ -1,40 +1,38 @@
-import { NextResponse } from "next/server";
+import { extractText } from "../../../lib/extractText";
+
+import { generateCertifiedPdf } from "@/lib/generateCertifiedPdf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const formData = await req.formData();
+  try {
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
 
-  const file = formData.get("file");
+    if (!file) {
+      return new Response("No file uploaded", { status: 400 });
+    }
 
-  // 🔎 HARD DEBUG
-  if (!file) {
-    console.error("❌ NO FILE RECEIVED");
-    return NextResponse.json(
-      { error: "No file uploaded" },
-      { status: 400 }
-    );
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    const { text, source } = await extractText(buffer, file.type);
+
+    const pdfBytes = await generateCertifiedPdf({
+      originalFilename: file.name,
+      extractedText: text || "No text detected in image.",
+    });
+
+    return new Response(pdfBytes, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="certified-${file.name}.pdf"`,
+        "X-Text-Source": source,
+      },
+    });
+  } catch (err) {
+    console.error("OCR UPLOAD ERROR", err);
+    return new Response("Upload failed", { status: 500 });
   }
-
-  if (!(file instanceof File)) {
-    console.error("❌ FILE IS NOT INSTANCE OF File", file);
-    return NextResponse.json(
-      { error: "Invalid file object" },
-      { status: 400 }
-    );
-  }
-
-  console.log("✅ FILE RECEIVED:", {
-    name: file.name,
-    type: file.type,
-    size: file.size,
-  });
-
-  return NextResponse.json({
-    success: true,
-    filename: file.name,
-    size: file.size,
-    type: file.type,
-  });
 }
