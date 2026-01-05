@@ -1,4 +1,6 @@
+// Force update 2
 import type { NextConfig } from "next";
+// ... the rest of your code
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["tesseract.js"],
