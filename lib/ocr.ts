@@ -6,32 +6,32 @@ import sharp from "sharp";
 export async function runOCR(buffer: Buffer): Promise<string> {
   const root = process.cwd();
 
-  // 1. Optimize Image (Crucial for speed and bypassing BMP issues)
+  // 1. Optimize image
   const cleanBuffer = await sharp(buffer)
     .resize(1200)
     .toFormat('png')
     .toBuffer();
 
-  // 2. ABSOLUTE PATHS - No guessing for the server
-  const workerPath = path.join(root, "node_modules/tesseract.js/src/worker-script/node/index.js");
-  const corePath = path.join(root, "node_modules/tesseract.js-core");
+  // 2. Point to the "Safe" Public folder locations
+  // In Vercel, public files are available at path.join(root, "public", ...)
+  const workerPath = path.join(root, "public/tesseract/worker-script/node/index.js");
+  const corePath = path.join(root, "public/tesseract/tesseract.js-core");
 
   const worker = await createWorker("eng", 1, {
     workerPath,
     corePath,
-    langPath: root,
+    langPath: root, 
     gzip: false,
-    logger: (m) => console.log("Status:", m.status),
+    logger: (m) => console.log("OCR Status:", m.status),
   });
 
   try {
     const { data: { text } } = await worker.recognize(cleanBuffer);
     return text?.trim() || "";
-  } catch (error) {
-    console.error("Internal OCR Error:", error);
-    throw error;
+  } catch (err) {
+    console.error("Public Folder OCR Error:", err);
+    throw err;
   } finally {
-    // ALWAYS terminate to prevent the "worked once then failed" memory lock
     await worker.terminate();
   }
 }
