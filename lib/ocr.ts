@@ -6,31 +6,32 @@ import sharp from "sharp";
 export async function runOCR(buffer: Buffer): Promise<string> {
   const root = process.cwd();
 
-  // 1. Convert to PNG to bypass internal BMP-JS logic completely
+  // 1. Optimize Image (Crucial for speed and bypassing BMP issues)
   const cleanBuffer = await sharp(buffer)
     .resize(1200)
     .toFormat('png')
     .toBuffer();
 
-  // 2. Define absolute paths to the ACTUAL node_modules location on the server
-  const workerPath = path.resolve(root, "node_modules/tesseract.js/src/worker-script/node/index.js");
-  const corePath = path.resolve(root, "node_modules/tesseract.js-core");
+  // 2. ABSOLUTE PATHS - No guessing for the server
+  const workerPath = path.join(root, "node_modules/tesseract.js/src/worker-script/node/index.js");
+  const corePath = path.join(root, "node_modules/tesseract.js-core");
 
   const worker = await createWorker("eng", 1, {
     workerPath,
     corePath,
-    langPath: root, // Assumes eng.traineddata is at the root
+    langPath: root,
     gzip: false,
-    logger: (m) => console.log("OCR Progress:", m.status),
+    logger: (m) => console.log("Status:", m.status),
   });
 
   try {
     const { data: { text } } = await worker.recognize(cleanBuffer);
     return text?.trim() || "";
-  } catch (err) {
-    console.error("OCR Runtime Error:", err);
-    throw err;
+  } catch (error) {
+    console.error("Internal OCR Error:", error);
+    throw error;
   } finally {
+    // ALWAYS terminate to prevent the "worked once then failed" memory lock
     await worker.terminate();
   }
 }

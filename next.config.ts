@@ -12,14 +12,16 @@ const nextConfig: NextConfig = {
   ],
 
   outputFileTracingIncludes: {
+    // This glob ensures that ANY serverless function (like your API)
+    // carries the entire library folder.
     "/**/*": [
-      path.join(process.cwd(), "node_modules/tesseract.js/**/*"),
-      path.join(process.cwd(), "node_modules/tesseract.js-core/**/*"),
-      path.join(process.cwd(), "node_modules/wasm-feature-detect/**/*"),
-      path.join(process.cwd(), "node_modules/bmp-js/**/*"),
-      path.join(process.cwd(), "node_modules/pako/**/*"),
-      path.join(process.cwd(), "node_modules/sharp/**/*"),
-      path.join(process.cwd(), "eng.traineddata"),
+      "./node_modules/tesseract.js/**/*",
+      "./node_modules/tesseract.js-core/**/*",
+      "./node_modules/wasm-feature-detect/**/*",
+      "./node_modules/bmp-js/**/*",
+      "./node_modules/pako/**/*",
+      "./node_modules/sharp/**/*",
+      "./eng.traineddata",
     ],
   },
 };
