@@ -31,7 +31,9 @@ export async function POST(req: Request) {
     }
 
     // 5. Return the PDF
-    return new Response(pdfBytes, {
+    // 5. Return the PDF
+    // Wrapping pdfBytes in Buffer.from() solves the TypeScript assignment error
+    return new Response(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
