@@ -3,6 +3,11 @@ import { generateCertifiedPdf } from "@/lib/generateCertifiedPdf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// app/api/ocr/route.ts
+
+export const maxDuration = 300; // Allow 5 minutes (max for Pro, 60s for Hobby)
+// Note: If you are on the Hobby (Free) plan, the max is 60s. 
+// If it still times out at 60s, we must optimize the image.
 
 export async function POST(req: Request) {
   try {

@@ -1,14 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // 1. Keep these as external so their internal structure isn't messed up
-  serverExternalPackages: ["tesseract.js", "tesseract-wasm", "bmp-js"],
-  
+  serverExternalPackages: ["tesseract.js", "tesseract-wasm", "bmp-js", "sharp"], // ✅ Added sharp
   outputFileTracingIncludes: {
     "/**/*": [
       "./node_modules/tesseract.js/**/*",
       "./node_modules/tesseract-wasm/**/*",
-      "./node_modules/bmp-js/**/*", // ✅ Add this line
+      "./node_modules/bmp-js/**/*",
+      "./node_modules/sharp/**/*", // ✅ Added sharp
       "./public/**/*",
     ],
   },
