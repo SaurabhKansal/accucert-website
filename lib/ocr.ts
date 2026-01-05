@@ -1,27 +1,37 @@
+// lib/ocr.ts
 import { createWorker } from "tesseract.js";
 import path from "path";
-import sharp from "sharp"; // ✅ Add this
+import sharp from "sharp";
 
 export async function runOCR(buffer: Buffer): Promise<string> {
   const root = process.cwd();
-  
-  // PRE-PROCESS: Shrink the image and make it black & white
-  // This makes Tesseract run 5x - 10x faster
-  const optimizedBuffer = await sharp(buffer)
-    .resize(1500) // Resize to a reasonable width
-    .grayscale()  // Black and white is easier for OCR to read
-    .toBuffer();
+  let processedBuffer = buffer;
 
+  // Step 1: Attempt optimization
+  try {
+    processedBuffer = await sharp(buffer)
+      .resize(1200) // Lower resolution = much faster OCR
+      .grayscale()
+      .toBuffer();
+    console.log("Image optimized successfully");
+  } catch (sharpError) {
+    console.error("Sharp optimization failed, using original buffer:", sharpError);
+  }
+
+  // Step 2: Initialize Worker
   const worker = await createWorker("eng", 1, {
     workerPath: path.join(root, "node_modules/tesseract.js/src/worker-script/node/index.js"),
     corePath: path.join(root, "node_modules/tesseract-wasm/dist/tesseract-core.wasm.js"),
     langPath: root,
-    logger: (m) => console.log(m.status, Math.round(m.progress * 100) + "%"),
+    cachePath: root,
   });
 
   try {
-    const { data: { text } } = await worker.recognize(optimizedBuffer);
+    const { data: { text } } = await worker.recognize(processedBuffer);
     return text?.trim() || "";
+  } catch (ocrError: any) {
+    console.error("Tesseract Engine Error:", ocrError);
+    throw new Error(`OCR Engine failed: ${ocrError.message}`);
   } finally {
     await worker.terminate();
   }
