@@ -1,15 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Sharp still needs to be external to handle its Linux binaries correctly
-  serverExternalPackages: ["sharp", "tesseract.js", "tesseract.js-core"],
-  
-  outputFileTracingIncludes: {
-    "/**/*": [
-      "./public/**/*",
-      "./eng.traineddata"
-    ],
-  },
+  // We no longer need any special tracing or external packages for Google Vision
+  // Next.js handles the standard 'fetch' API automatically
 };
 
 export default nextConfig;

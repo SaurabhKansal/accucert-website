@@ -11,11 +11,9 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",
     "@google-cloud/vision": "^5.3.4",
-    "bmp-js": "^0.1.0",
     "canvas": "^3.2.0",
     "multer": "^2.0.2",
     "next": "16.1.1",
-    "pako": "^2.1.0",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.530",
@@ -23,10 +21,7 @@
     "react-dom": "19.2.3",
     "sharp": "^0.34.5",
     "tesseract-wasm": "^0.11.0",
-    "tesseract.js": "^5.0.3",
-    "tesseract.js-core": "^6.1.2",
-    "uuid": "^13.0.0",
-    "wasm-feature-detect": "^1.8.0"
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -1,37 +1,35 @@
 // lib/ocr.ts
-import { createWorker } from "tesseract.js";
-import path from "path";
-import sharp from "sharp";
-
 export async function runOCR(buffer: Buffer): Promise<string> {
-  const root = process.cwd();
+  const apiKey = process.env.GOOGLE_VISION_API_KEY;
 
-  // 1. Optimize image
-  const cleanBuffer = await sharp(buffer)
-    .resize(1200)
-    .toFormat('png')
-    .toBuffer();
+  if (!apiKey) {
+    console.error("Missing Google API Key");
+    throw new Error("OCR Configuration Error");
+  }
 
-  // 2. Point to the "Safe" Public folder locations
-  // In Vercel, public files are available at path.join(root, "public", ...)
-  const workerPath = path.join(root, "public/tesseract/worker-script/node/index.js");
-  const corePath = path.join(root, "public/tesseract/tesseract.js-core");
+  const base64Image = buffer.toString("base64");
+  const url = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
 
-  const worker = await createWorker("eng", 1, {
-    workerPath,
-    corePath,
-    langPath: root, 
-    gzip: false,
-    logger: (m) => console.log("OCR Status:", m.status),
+  const requestBody = {
+    requests: [{
+      image: { content: base64Image },
+      features: [{ type: "TEXT_DETECTION" }],
+    }],
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
   });
 
-  try {
-    const { data: { text } } = await worker.recognize(cleanBuffer);
-    return text?.trim() || "";
-  } catch (err) {
-    console.error("Public Folder OCR Error:", err);
-    throw err;
-  } finally {
-    await worker.terminate();
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(`Google Vision API Error: ${JSON.stringify(errorData)}`);
   }
+
+  const data = await response.json();
+  const text = data.responses[0]?.fullTextAnnotation?.text || "";
+  
+  return text.trim();
 }
