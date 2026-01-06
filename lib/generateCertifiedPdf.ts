@@ -11,6 +11,7 @@ export async function generateCertifiedPdf({
 }: GeneratePdfInput): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold); // Added bold for emphasis
 
   /* ===============================
      PAGE 1 — CERTIFICATION PAGE
@@ -22,7 +23,7 @@ export async function generateCertifiedPdf({
     x: 50,
     y: height - 80,
     size: 26,
-    font,
+    font: fontBold,
   });
 
   cover.drawText(
@@ -37,9 +38,21 @@ export async function generateCertifiedPdf({
     }
   );
 
+  // ✅ ADDED: AUTOMATED TRANSLATION DISCLAIMER
+  cover.drawText(
+    "Note: This is an automated translation generated via Accucert AI technology for review purposes.",
+    {
+      x: 50,
+      y: height - 185,
+      size: 10,
+      font,
+      color: rgb(0.4, 0.4, 0.4), // Professional Grey
+    }
+  );
+
   cover.drawText(`Date: ${new Date().toLocaleDateString()}`, {
     x: 50,
-    y: height - 210,
+    y: height - 225,
     size: 11,
     font,
   });
@@ -53,9 +66,9 @@ export async function generateCertifiedPdf({
   });
 
   /* ===============================
-     PAGE 2+ — EXTRACTED TEXT
+     PAGE 2+ — EXTRACTED & TRANSLATED TEXT
   =============================== */
-
+  // The rest of your code remains exactly the same...
   const cleanText = extractedText
     .replace(/\r/g, "")
     .split("\n")
@@ -72,31 +85,19 @@ export async function generateCertifiedPdf({
   let y = page.getHeight() - marginTop;
 
   for (const line of cleanText) {
-    // Wrap long lines safely
     const words = line.split(" ");
     let currentLine = "";
 
     for (const word of words) {
-      const testLine = currentLine
-        ? `${currentLine} ${word}`
-        : word;
-
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
       const textWidth = font.widthOfTextAtSize(testLine, fontSize);
 
       if (textWidth > maxWidth) {
-        // Draw current line
         if (y < marginBottom) {
           page = pdfDoc.addPage([595, 842]);
           y = page.getHeight() - marginTop;
         }
-
-        page.drawText(currentLine, {
-          x: 50,
-          y,
-          size: fontSize,
-          font,
-        });
-
+        page.drawText(currentLine, { x: 50, y, size: fontSize, font });
         y -= lineHeight;
         currentLine = word;
       } else {
@@ -104,20 +105,12 @@ export async function generateCertifiedPdf({
       }
     }
 
-    // Draw remaining line
     if (currentLine) {
       if (y < marginBottom) {
         page = pdfDoc.addPage([595, 842]);
         y = page.getHeight() - marginTop;
       }
-
-      page.drawText(currentLine, {
-        x: 50,
-        y,
-        size: fontSize,
-        font,
-      });
-
+      page.drawText(currentLine, { x: 50, y, size: fontSize, font });
       y -= lineHeight;
     }
   }
