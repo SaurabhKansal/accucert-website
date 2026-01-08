@@ -15,32 +15,45 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: "Missing file or email" }), { status: 400 });
     }
 
-    // 1. GET & VALIDATE VARIABLES
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim(); // .trim() removes hidden spaces
+    // 1. SAFE INITIALIZATION
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     const resendKey = process.env.RESEND_API_KEY?.trim();
 
-    // DEBUG LOG: Check this in Vercel Logs to identify the typo
-    console.log("Configuration Audit:", {
-      urlExists: !!supabaseUrl,
-      urlIsValid: supabaseUrl?.startsWith("https://"),
-      keyExists: !!supabaseKey,
-      emailExists: !!userEmail
-    });
-
-    if (!supabaseUrl || !supabaseUrl.startsWith("https://")) {
-      throw new Error(`Invalid Supabase URL: Check your Vercel Environment Variables.`);
+    if (!supabaseUrl || !supabaseKey || !resendKey) {
+      throw new Error("Server Configuration Error: Missing Environment Variables");
     }
 
-    // 2. INITIALIZE CLIENTS
-    const supabase = createClient(supabaseUrl, supabaseKey!);
+    const supabase = createClient(supabaseUrl, supabaseKey);
     const resend = new Resend(resendKey);
 
-    // 3. OCR + TRANSLATION
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // 2. UPLOAD ORIGINAL TO SUPABASE STORAGE
+    // We create a unique filename to avoid overwriting
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `uploads/${fileName}`;
+
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from("documents")
+      .upload(filePath, buffer, {
+        contentType: file.type,
+        upsert: false
+      });
+
+    if (storageError) throw new Error(`Storage Error: ${storageError.message}`);
+
+    // Get the Public URL for the image
+    const { data: { publicUrl } } = supabase.storage
+      .from("documents")
+      .getPublicUrl(filePath);
+
+    // 3. RUN OCR + TRANSLATION
     const translatedText = await runOCR(buffer);
 
-    // 4. SAVE TO SUPABASE
+    // 4. SAVE RECORD TO DATABASE
     const { data, error: dbError } = await supabase
       .from("translations")
       .insert([
@@ -49,28 +62,24 @@ export async function POST(req: Request) {
           user_email: userEmail,
           extracted_text: translatedText,
           status: "pending",
+          image_url: publicUrl // This allows the Admin to see the original image
         },
       ])
       .select()
       .single();
 
-    if (dbError) {
-      console.error("Database Error:", dbError);
-      throw new Error(`Database save failed: ${dbError.message}`);
-    }
+    if (dbError) throw dbError;
 
     // 5. SEND CONFIRMATION EMAIL
     await resend.emails.send({
       from: "Accucert <onboarding@resend.dev>", 
       to: userEmail,
-      subject: "Document Received - Accucert Professional Review",
+      subject: "Document Received - Accucert Review Team",
       html: `
-        <div style="font-family: sans-serif; color: #333; line-height: 1.6;">
-          <h2 style="color: #1a2a3a;">Confirmation</h2>
-          <p>We have successfully received <strong>${file.name}</strong>.</p>
-          <p>Our team is reviewing the document. You will receive an email with your certified PDF once approved.</p>
-          <br />
-          <p>© 2026 Accucert Official Translation Services</p>
+        <div style="font-family: sans-serif; color: #333;">
+          <h2>Confirmation</h2>
+          <p>We have received <strong>${file.name}</strong> for professional translation review.</p>
+          <p>You will receive your certified PDF via email once our team completes the verification.</p>
         </div>
       `,
     });
@@ -81,7 +90,7 @@ export async function POST(req: Request) {
     });
 
   } catch (err: any) {
-    console.error("CRITICAL UPLOAD ERROR:", err.message);
+    console.error("UPLOAD ERROR:", err.message);
     return new Response(JSON.stringify({ error: err.message }), { 
       status: 500,
       headers: { "Content-Type": "application/json" }
