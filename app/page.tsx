@@ -72,7 +72,7 @@ export default function Home() {
       {theme === "alt2" && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden flex flex-wrap justify-center items-center opacity-[0.03]">
           {Array.from({ length: 20 }).map((_, i) => (
-            <span key={i} className="text-9xl font-black -rotate-12 uppercase m-20 select-none tracking-tighter">Accucert</span>
+            <span key={i} className="text-9xl font-black -rotate-12 uppercase m-20 select-none">Accucert</span>
           ))}
         </div>
       )}
@@ -89,15 +89,15 @@ export default function Home() {
       {isUploading && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-            <div className="w-16 h-16 border-4 border-slate-100 border-t-[#18222b] rounded-full animate-spin mx-auto mb-4" />
+            <div className="w-16 h-16 border-4 border-slate-100 border-t-[var(--accent)] rounded-full animate-spin mx-auto mb-4" />
             <h3 className="text-xl font-bold mb-2">Processing...</h3>
             <div className="w-full bg-slate-100 rounded-full h-2 mb-4">
               <div 
-                className="bg-[#18222b] h-2 rounded-full transition-all duration-300" 
+                className="bg-[var(--accent)] h-2 rounded-full transition-all duration-300" 
                 style={{ width: `${uploadProgress}%` }}
               />
             </div>
-            <span className="text-sm font-bold text-[#18222b]">{uploadProgress}% Complete</span>
+            <span className="text-sm font-bold text-[var(--accent)]">{uploadProgress}% Complete</span>
           </div>
         </div>
       )}
@@ -109,7 +109,7 @@ export default function Home() {
         <button onClick={() => setTheme("alt2")} className="px-3 py-1 bg-slate-900 text-white text-[10px] rounded">C</button>
       </div>
 
-      {/* HEADER: Updated for Theme A requested breadth */}
+      {/* HEADER: Original Styling with Theme A Adjustments */}
       <header className={`bg-slate-900 border-b border-slate-700 sticky top-0 z-40 transition-all ${theme === 'default' ? 'py-10' : 'py-4'}`}>
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           {theme !== "alt1" ? (
@@ -117,27 +117,27 @@ export default function Home() {
           ) : <div className="w-8" />}
           
           <nav className={`hidden md:flex gap-8 font-medium text-slate-200 ${theme === 'default' ? 'text-lg gap-12' : 'text-sm'}`}>
-            <a href="#services" className="hover:text-[#18222b] transition">Services</a>
-            <a href="#how-it-works" className="hover:text-[#18222b] transition">How It Works</a>
-            <a href="#contact" className="hover:text-[#18222b] transition">Contact</a>
+            <a href="#services" className="hover:text-[var(--accent)] transition">Services</a>
+            <a href="#how-it-works" className="hover:text-[var(--accent)] transition">How It Works</a>
+            <a href="#contact" className="hover:text-[var(--accent)] transition">Contact</a>
           </nav>
-          <button onClick={handleUploadClick} className="bg-[#18222b] hover:opacity-80 transition text-white px-5 py-2 rounded-md text-sm font-semibold">
+          <button onClick={handleUploadClick} className="bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white px-5 py-2 rounded-md text-sm font-semibold">
             Get Started
           </button>
         </div>
       </header>
 
-      {/* HERO SECTION: Updated for Theme B logo placement */}
+      {/* HERO SECTION: Original Styling with Theme B Adjustments */}
       <section className={`${isLightHero ? "bg-white" : "bg-slate-900"} py-24 border-b border-slate-100 relative z-10`}>
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-16 items-center">
           <div>
-            {theme === "alt1" && <img src="/logo.jpeg" alt="Accucert" className="h-12 mb-6" />}
+            {theme === "alt1" && <img src="/logo.jpeg" alt="Accucert" className="h-10 mb-6" />}
             <span className="inline-block bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-6">
               Trusted by 10,000+ Clients Worldwide
             </span>
             <h1 className={`text-5xl font-extrabold mb-6 leading-tight ${isLightHero ? "text-slate-900" : "text-white"}`}>
               Official Document <br />
-              <span className="text-[#18222b]">Translation</span> You Can Trust
+              <span className="text-[var(--accent)]">Translation</span> You Can Trust
             </h1>
 
             {/* EMAIL INPUT BOX */}
@@ -148,19 +148,19 @@ export default function Home() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="email@example.com"
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#18222b] outline-none text-slate-900"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-[var(--accent)] outline-none text-slate-900"
               />
             </div>
 
-            <button onClick={handleUploadClick} className="bg-[#18222b] hover:opacity-90 transition text-white px-8 py-4 rounded-md font-bold text-lg shadow-xl shadow-[#18222b]/20">
+            <button onClick={handleUploadClick} className="bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white px-8 py-4 rounded-md font-bold text-lg shadow-xl shadow-[var(--accent)]/20">
               Upload Document
             </button>
           </div>
 
           <div className="bg-slate-100 rounded-3xl p-6 text-slate-800">
-            <div className="bg-[#18222b]/10 rounded-2xl p-16 text-center flex flex-col items-center">
+            <div className="bg-[var(--accent)]/10 rounded-2xl p-16 text-center flex flex-col items-center">
               <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm">
-                <svg className="w-8 h-8 text-[#18222b]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-8 h-8 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
@@ -171,12 +171,12 @@ export default function Home() {
         </div>
       </section>
 
-      {/* SERVICES SECTION */}
+      {/* SERVICES SECTION: Original Styling Restored */}
       <section id="services" className="bg-white py-24 relative z-10">
         <div className="max-w-7xl mx-auto px-6 text-center">
-          <div className="w-20 h-1 bg-[#18222b] mx-auto mb-6 rounded-full" />
+          <div className="w-20 h-1 bg-[var(--accent)] mx-auto mb-6 rounded-full" />
           <h2 className="text-4xl font-bold mb-4">
-            Documents We <span className="text-[#18222b]">Translate</span>
+            Documents We <span className="text-[var(--primary)]">Translate</span>
           </h2>
           <p className="text-slate-600 max-w-2xl mx-auto mb-16">
             Specialising in official and legal documents accepted worldwide.
@@ -190,9 +190,9 @@ export default function Home() {
               { t: "Marriage Certificates", i: <><circle cx="8" cy="8" r="6" /><circle cx="16" cy="16" r="6" /></> }, 
               { t: "Business Documents", i: <><rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></> }
             ].map((item) => (
-              <div key={item.t} className="bg-gradient-to-br from-[#18222b]/10 to-white rounded-xl p-8 border border-slate-200 text-left hover:border-[#18222b] transition-all group">
-                <div className="w-10 h-10 mb-4 text-[#18222b]">
-                   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">{item.i}</svg>
+              <div key={item.t} className="bg-gradient-to-br from-[var(--accent)]/10 to-white rounded-xl p-8 border border-slate-200 text-left hover:border-[var(--accent)] transition-all group">
+                <div className="w-10 h-10 mb-4 text-[var(--accent)]">
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">{item.i}</svg>
                 </div>
                 <h3 className="font-bold mb-2">{item.t}</h3>
                 <p className="text-sm text-slate-600">Certified translation services.</p>
@@ -202,20 +202,20 @@ export default function Home() {
         </div>
       </section>
 
-      {/* HOW IT WORKS SECTION */}
+      {/* HOW IT WORKS SECTION: Original Styling Restored */}
       <section id="how-it-works" className="py-24 bg-slate-50 relative z-10">
         <div className="max-w-7xl mx-auto px-6 text-center">
           <h2 className="text-4xl font-bold mb-16">
-            How It <span className="text-[#18222b]">Works</span>
+            How It <span className="text-[var(--primary)]">Works</span>
           </h2>
           <div className="grid md:grid-cols-3 gap-12">
             {[
               { step: "Upload", desc: "Select your files safely." },
-              { step: "Professional Review", desc: "Manual verification of all details." },
-              { step: "Secure Delivery", desc: "Certified PDF via email." }
+              { step: "Review", desc: "Automated OCR extraction." },
+              { step: "Download", desc: "Get your certified PDF." }
             ].map((item, i) => (
               <div key={item.step}>
-                <div className="text-6xl font-black text-[#18222b] opacity-20 mb-4">
+                <div className="text-6xl font-black text-[var(--accent)] opacity-20 mb-4">
                   0{i + 1}
                 </div>
                 <h3 className="font-bold text-xl mb-2">{item.step}</h3>
@@ -226,25 +226,12 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA SECTION */}
-      <section className="bg-white py-24 relative z-10">
-        <div className="max-w-4xl mx-auto px-6 text-center">
-          <div className="rounded-3xl border border-slate-200 p-16 bg-slate-50">
-            <h2 className="text-4xl font-bold mb-4 text-slate-900">Ready to Get Started?</h2>
-            <p className="mb-8 text-slate-600">Upload your document now and receive a certified copy in seconds.</p>
-            <button onClick={handleUploadClick} className="bg-[#18222b] hover:opacity-80 transition text-white px-10 py-4 rounded-md font-bold">
-              Upload Your Document
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
+      {/* FOOTER: Original Styling Restored */}
       <footer className="bg-slate-900 text-slate-300 border-t border-slate-700 relative z-10">
         <div className="max-w-7xl mx-auto px-6 py-16 grid md:grid-cols-4 gap-8 text-sm">
           <div className="col-span-2">
             <img src="/logo.jpeg" className="h-7 mb-4" />
-            <p className="max-w-sm">Certified translations for official documents worldwide using secure technology.</p>
+            <p className="max-w-sm">Certified translations for official documents worldwide using secure AI technology.</p>
           </div>
         </div>
         <div className="text-center text-xs text-slate-500 py-8 border-t border-slate-800">
