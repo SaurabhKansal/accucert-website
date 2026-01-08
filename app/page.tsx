@@ -66,13 +66,13 @@ export default function Home() {
   };
 
   return (
-    <main data-theme={theme} className="min-h-screen bg-slate-50 text-slate-800 relative" style={{ "--accent": "#18222b", "--primary": "#18222b" } as any}>
+    <main data-theme={theme} className="min-h-screen bg-slate-50 text-slate-800 relative">
       
       {/* THEME C WATERMARK */}
       {theme === "alt2" && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden flex flex-wrap justify-center items-center opacity-[0.03]">
           {Array.from({ length: 20 }).map((_, i) => (
-            <span key={i} className="text-9xl font-black -rotate-12 uppercase m-20 select-none">Accucert</span>
+            <span key={i} className="text-9xl font-black -rotate-12 uppercase m-20 select-none tracking-tighter">Accucert</span>
           ))}
         </div>
       )}
@@ -90,8 +90,7 @@ export default function Home() {
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
             <div className="w-16 h-16 border-4 border-slate-100 border-t-[#18222b] rounded-full animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-bold mb-2">Submitting...</h3>
-            <p className="text-xs text-slate-500 mb-4">Securing your document for review</p>
+            <h3 className="text-xl font-bold mb-2">Processing...</h3>
             <div className="w-full bg-slate-100 rounded-full h-2 mb-4">
               <div 
                 className="bg-[#18222b] h-2 rounded-full transition-all duration-300" 
@@ -110,17 +109,17 @@ export default function Home() {
         <button onClick={() => setTheme("alt2")} className="px-3 py-1 bg-slate-900 text-white text-[10px] rounded">C</button>
       </div>
 
-      {/* HEADER: Broader for Theme A as requested */}
+      {/* HEADER: Updated for Theme A requested breadth */}
       <header className={`bg-slate-900 border-b border-slate-700 sticky top-0 z-40 transition-all ${theme === 'default' ? 'py-10' : 'py-4'}`}>
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           {theme !== "alt1" ? (
             <img src="/logo.jpeg" alt="Accucert" className={`w-auto transition-all ${theme === 'default' ? 'h-20' : 'h-8'}`} />
           ) : <div className="w-8" />}
-
-          <nav className={`hidden md:flex gap-8 text-sm font-medium text-slate-200 ${theme === 'default' ? 'text-lg gap-12' : 'text-sm'}`}>
-            <a href="#services" className="hover:text-white transition">Services</a>
-            <a href="#how-it-works" className="hover:text-white transition">How It Works</a>
-            <a href="#contact" className="hover:text-white transition">Contact</a>
+          
+          <nav className={`hidden md:flex gap-8 font-medium text-slate-200 ${theme === 'default' ? 'text-lg gap-12' : 'text-sm'}`}>
+            <a href="#services" className="hover:text-[#18222b] transition">Services</a>
+            <a href="#how-it-works" className="hover:text-[#18222b] transition">How It Works</a>
+            <a href="#contact" className="hover:text-[#18222b] transition">Contact</a>
           </nav>
           <button onClick={handleUploadClick} className="bg-[#18222b] hover:opacity-80 transition text-white px-5 py-2 rounded-md text-sm font-semibold">
             Get Started
@@ -128,8 +127,8 @@ export default function Home() {
         </div>
       </header>
 
-      {/* HERO SECTION: Logo moved for Theme B */}
-      <section className={`${isLightHero ? "bg-white" : "bg-slate-900"} py-24 relative z-10`}>
+      {/* HERO SECTION: Updated for Theme B logo placement */}
+      <section className={`${isLightHero ? "bg-white" : "bg-slate-900"} py-24 border-b border-slate-100 relative z-10`}>
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-16 items-center">
           <div>
             {theme === "alt1" && <img src="/logo.jpeg" alt="Accucert" className="h-12 mb-6" />}
@@ -141,6 +140,7 @@ export default function Home() {
               <span className="text-[#18222b]">Translation</span> You Can Trust
             </h1>
 
+            {/* EMAIL INPUT BOX */}
             <div className="mb-6 max-w-sm">
               <label className={`block text-xs font-bold uppercase mb-2 ${isLightHero ? 'text-slate-400' : 'text-slate-500'}`}>Enter Email for Delivery</label>
               <input 
@@ -158,25 +158,30 @@ export default function Home() {
           </div>
 
           <div className="bg-slate-100 rounded-3xl p-6 text-slate-800">
-            <div className="bg-white rounded-2xl p-16 text-center flex flex-col items-center shadow-sm">
-              <div className="w-16 h-16 bg-[#18222b]/10 rounded-full flex items-center justify-center mb-4">
+            <div className="bg-[#18222b]/10 rounded-2xl p-16 text-center flex flex-col items-center">
+              <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm">
                 <svg className="w-8 h-8 text-[#18222b]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <p className="font-bold">Professional Certified Review</p>
-              <p className="text-xs text-slate-500 mt-2">Team-verified translations</p>
+              <p className="font-bold">Professional Certified Translations</p>
+              <p className="text-xs text-slate-500 mt-2">Upload any document to begin</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* SERVICES SECTION: Original styling preserved */}
+      {/* SERVICES SECTION */}
       <section id="services" className="bg-white py-24 relative z-10">
         <div className="max-w-7xl mx-auto px-6 text-center">
           <div className="w-20 h-1 bg-[#18222b] mx-auto mb-6 rounded-full" />
-          <h2 className="text-4xl font-bold mb-4 text-slate-900">Documents We <span className="text-[#18222b]">Translate</span></h2>
-          <div className="grid md:grid-cols-3 gap-8 mt-16 text-left">
+          <h2 className="text-4xl font-bold mb-4">
+            Documents We <span className="text-[#18222b]">Translate</span>
+          </h2>
+          <p className="text-slate-600 max-w-2xl mx-auto mb-16">
+            Specialising in official and legal documents accepted worldwide.
+          </p>
+          <div className="grid md:grid-cols-3 gap-8 text-left">
             {[
               { t: "Visa Documents", i: <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /> }, 
               { t: "Birth Certificates", i: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /> }, 
@@ -185,22 +190,24 @@ export default function Home() {
               { t: "Marriage Certificates", i: <><circle cx="8" cy="8" r="6" /><circle cx="16" cy="16" r="6" /></> }, 
               { t: "Business Documents", i: <><rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></> }
             ].map((item) => (
-              <div key={item.t} className="bg-slate-50 p-8 rounded-2xl border border-slate-100 hover:border-[#18222b] transition-all group">
-                <div className="w-12 h-12 mb-4 text-[#18222b]">
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">{item.i}</svg>
+              <div key={item.t} className="bg-gradient-to-br from-[#18222b]/10 to-white rounded-xl p-8 border border-slate-200 text-left hover:border-[#18222b] transition-all group">
+                <div className="w-10 h-10 mb-4 text-[#18222b]">
+                   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">{item.i}</svg>
                 </div>
-                <h3 className="font-bold mb-2 text-slate-900">{item.t}</h3>
-                <p className="text-sm text-slate-500">Official certified translation for legal use.</p>
+                <h3 className="font-bold mb-2">{item.t}</h3>
+                <p className="text-sm text-slate-600">Certified translation services.</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* HOW IT WORKS SECTION: Original styling preserved */}
-      <section id="how-it-works" className="py-24 bg-slate-900 text-white relative z-10">
+      {/* HOW IT WORKS SECTION */}
+      <section id="how-it-works" className="py-24 bg-slate-50 relative z-10">
         <div className="max-w-7xl mx-auto px-6 text-center">
-          <h2 className="text-4xl font-bold mb-16">Professional <span className="text-[#18222b]">Process</span></h2>
+          <h2 className="text-4xl font-bold mb-16">
+            How It <span className="text-[#18222b]">Works</span>
+          </h2>
           <div className="grid md:grid-cols-3 gap-12">
             {[
               { step: "Upload", desc: "Select your files safely." },
@@ -208,21 +215,36 @@ export default function Home() {
               { step: "Secure Delivery", desc: "Certified PDF via email." }
             ].map((item, i) => (
               <div key={item.step}>
-                <div className="text-6xl font-black text-[#18222b] opacity-20 mb-4">0{i + 1}</div>
+                <div className="text-6xl font-black text-[#18222b] opacity-20 mb-4">
+                  0{i + 1}
+                </div>
                 <h3 className="font-bold text-xl mb-2">{item.step}</h3>
-                <p className="text-slate-400">{item.desc}</p>
+                <p className="text-slate-600">{item.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* FOOTER: Original styling preserved */}
+      {/* CTA SECTION */}
+      <section className="bg-white py-24 relative z-10">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <div className="rounded-3xl border border-slate-200 p-16 bg-slate-50">
+            <h2 className="text-4xl font-bold mb-4 text-slate-900">Ready to Get Started?</h2>
+            <p className="mb-8 text-slate-600">Upload your document now and receive a certified copy in seconds.</p>
+            <button onClick={handleUploadClick} className="bg-[#18222b] hover:opacity-80 transition text-white px-10 py-4 rounded-md font-bold">
+              Upload Your Document
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* FOOTER */}
       <footer className="bg-slate-900 text-slate-300 border-t border-slate-700 relative z-10">
-        <div className="max-w-7xl mx-auto px-6 py-16 grid md:grid-cols-4 gap-8 text-sm text-center md:text-left">
+        <div className="max-w-7xl mx-auto px-6 py-16 grid md:grid-cols-4 gap-8 text-sm">
           <div className="col-span-2">
-            <img src="/logo.jpeg" className="h-7 mb-4 mx-auto md:mx-0" />
-            <p className="max-w-sm mx-auto md:mx-0">Official certified translations for worldwide use.</p>
+            <img src="/logo.jpeg" className="h-7 mb-4" />
+            <p className="max-w-sm">Certified translations for official documents worldwide using secure technology.</p>
           </div>
         </div>
         <div className="text-center text-xs text-slate-500 py-8 border-t border-slate-800">
