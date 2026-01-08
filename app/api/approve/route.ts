@@ -2,18 +2,26 @@ import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 import { generateCertifiedPdf } from "@/lib/generateCertifiedPdf";
 
-// Note: Use SERVICE_ROLE_KEY here because it bypasses RLS for admin actions
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-const resend = new Resend(process.env.RESEND_API_KEY);
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
     const { requestId, email } = await req.json();
 
-    // 1. Fetch the data from Supabase
+    // 1. SAFE INITIALIZATION (Prevents build-time 'Invalid supabaseUrl' error)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const resendKey = process.env.RESEND_API_KEY;
+
+    if (!supabaseUrl || !supabaseKey || !resendKey) {
+      console.error("Missing Environment Variables for Approval API");
+      return new Response("Server Configuration Error", { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const resend = new Resend(resendKey);
+
+    // 2. FETCH DATA FROM SUPABASE
     const { data: translation, error: fetchError } = await supabase
       .from("translations")
       .select("*")
@@ -21,27 +29,28 @@ export async function POST(req: Request) {
       .single();
 
     if (fetchError || !translation) {
-      throw new Error("Could not find translation request.");
+      throw new Error("Could not find translation request in database.");
     }
 
-    // 2. Generate the PDF using the text we stored earlier
+    // 3. GENERATE THE CERTIFIED PDF
     const pdfBytes = await generateCertifiedPdf({
       originalFilename: translation.filename,
       extractedText: translation.extracted_text,
     });
 
-    // 3. Send the Email with the Attachment
-    const { data, error: emailError } = await resend.emails.send({
-      from: "Accucert Team <onboarding@resend.dev>", // Generic for now
+    // 4. SEND EMAIL WITH ATTACHMENT
+    const { error: emailError } = await resend.emails.send({
+      from: "Accucert Team <onboarding@resend.dev>", // Generic until domain is verified
       to: email,
       subject: `Approved: Certified Translation for ${translation.filename}`,
       html: `
-        <div style="font-family: sans-serif; color: #333;">
-          <h2>Your Certified Translation is Ready</h2>
-          <p>The review of your document <strong>${translation.filename}</strong> is complete.</p>
-          <p>Please find the certified PDF attached to this email.</p>
+        <div style="font-family: sans-serif; color: #333; line-height: 1.6;">
+          <h2 style="color: #1a2a3a;">Your Certified Translation is Ready</h2>
+          <p>Hello,</p>
+          <p>The professional review of your document <strong>${translation.filename}</strong> is now complete.</p>
+          <p>Please find your certified PDF translation attached to this email.</p>
           <br />
-          <p>Thank you for choosing Accucert.</p>
+          <p>Best regards,<br /><strong>The Accucert Team</strong></p>
         </div>
       `,
       attachments: [
@@ -52,18 +61,29 @@ export async function POST(req: Request) {
       ],
     });
 
-    if (emailError) throw emailError;
+    if (emailError) {
+      console.error("Resend Email Error:", emailError);
+      throw new Error("Failed to send translation email.");
+    }
 
-    // 4. Update the status to 'approved' so it clears from the pending list
-    await supabase
+    // 5. UPDATE STATUS TO 'APPROVED'
+    const { error: updateError } = await supabase
       .from("translations")
       .update({ status: "approved" })
       .eq("id", requestId);
 
-    return new Response(JSON.stringify({ success: true }), { status: 200 });
+    if (updateError) throw updateError;
+
+    return new Response(JSON.stringify({ success: true }), { 
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
 
   } catch (err: any) {
-    console.error("APPROVAL ERROR:", err);
-    return new Response(`Error: ${err.message}`, { status: 500 });
+    console.error("APPROVAL ROUTE ERROR:", err);
+    return new Response(JSON.stringify({ error: err.message }), { 
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 }
