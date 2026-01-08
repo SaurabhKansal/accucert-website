@@ -12,27 +12,35 @@ export async function POST(req: Request) {
     const userEmail = formData.get("email") as string | null;
 
     if (!file || !userEmail) {
-      return new Response("Missing file or email", { status: 400 });
+      return new Response(JSON.stringify({ error: "Missing file or email" }), { status: 400 });
     }
 
-    // 1. SAFE INITIALIZATION (Prevents build-time 'Invalid supabaseUrl' error)
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const resendKey = process.env.RESEND_API_KEY;
+    // 1. GET & VALIDATE VARIABLES
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim(); // .trim() removes hidden spaces
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    const resendKey = process.env.RESEND_API_KEY?.trim();
 
-    if (!supabaseUrl || !supabaseKey || !resendKey) {
-      console.error("Missing Environment Variables for Upload API");
-      return new Response("Server Configuration Error", { status: 500 });
+    // DEBUG LOG: Check this in Vercel Logs to identify the typo
+    console.log("Configuration Audit:", {
+      urlExists: !!supabaseUrl,
+      urlIsValid: supabaseUrl?.startsWith("https://"),
+      keyExists: !!supabaseKey,
+      emailExists: !!userEmail
+    });
+
+    if (!supabaseUrl || !supabaseUrl.startsWith("https://")) {
+      throw new Error(`Invalid Supabase URL: Check your Vercel Environment Variables.`);
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // 2. INITIALIZE CLIENTS
+    const supabase = createClient(supabaseUrl, supabaseKey!);
     const resend = new Resend(resendKey);
 
-    // 2. OCR + Translation (Google Cloud)
+    // 3. OCR + TRANSLATION
     const buffer = Buffer.from(await file.arrayBuffer());
     const translatedText = await runOCR(buffer);
 
-    // 3. Save to Supabase (Record starts as 'pending')
+    // 4. SAVE TO SUPABASE
     const { data, error: dbError } = await supabase
       .from("translations")
       .insert([
@@ -46,22 +54,23 @@ export async function POST(req: Request) {
       .select()
       .single();
 
-    if (dbError) throw dbError;
+    if (dbError) {
+      console.error("Database Error:", dbError);
+      throw new Error(`Database save failed: ${dbError.message}`);
+    }
 
-    // 4. Send Confirmation Email to User (Resend)
+    // 5. SEND CONFIRMATION EMAIL
     await resend.emails.send({
       from: "Accucert <onboarding@resend.dev>", 
       to: userEmail,
       subject: "Document Received - Accucert Professional Review",
       html: `
         <div style="font-family: sans-serif; color: #333; line-height: 1.6;">
-          <h2 style="color: #1a2a3a;">We have received your document</h2>
-          <p>Hello,</p>
-          <p>This is to confirm that we have successfully received <strong>${file.name}</strong> for certified translation.</p>
-          <p>Our professional review team is currently processing your request. You will receive an email with your certified PDF once the review is complete.</p>
+          <h2 style="color: #1a2a3a;">Confirmation</h2>
+          <p>We have successfully received <strong>${file.name}</strong>.</p>
+          <p>Our team is reviewing the document. You will receive an email with your certified PDF once approved.</p>
           <br />
-          <hr style="border: none; border-top: 1px solid #eee;" />
-          <p style="font-size: 12px; color: #999;">© 2026 Accucert Official Translation Services. All rights reserved.</p>
+          <p>© 2026 Accucert Official Translation Services</p>
         </div>
       `,
     });
@@ -72,7 +81,10 @@ export async function POST(req: Request) {
     });
 
   } catch (err: any) {
-    console.error("UPLOAD ROUTE ERROR:", err);
-    return new Response(`Error: ${err.message}`, { status: 500 });
+    console.error("CRITICAL UPLOAD ERROR:", err.message);
+    return new Response(JSON.stringify({ error: err.message }), { 
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 }
