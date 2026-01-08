@@ -66,18 +66,14 @@ export default function Home() {
   };
 
   return (
-    <main data-theme={theme} className="min-h-screen bg-slate-50 text-slate-800 relative">
+    <main data-theme={theme} className="min-h-screen bg-slate-50 text-slate-800 relative" style={{ "--accent": "#18222b" } as any}>
       
-      {/* THEME C: STYLISH WATERMARK */}
+      {/* THEME C: WATERMARK */}
       {theme === "alt2" && (
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden opacity-[0.04]">
-          <div className="absolute inset-0 flex flex-wrap justify-around items-around content-around">
-            {Array.from({ length: 24 }).map((_, i) => (
-              <span key={i} className="text-8xl font-black -rotate-12 uppercase p-20 select-none tracking-tighter">
-                Accucert
-              </span>
-            ))}
-          </div>
+        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden flex flex-wrap justify-center items-center opacity-[0.03]">
+          {Array.from({ length: 20 }).map((_, i) => (
+            <span key={i} className="text-9xl font-black -rotate-12 uppercase m-20 select-none tracking-tighter">Accucert</span>
+          ))}
         </div>
       )}
 
@@ -93,16 +89,15 @@ export default function Home() {
       {isUploading && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-            <div className="w-16 h-16 border-4 border-slate-100 border-t-[var(--accent)] rounded-full animate-spin mx-auto mb-4" />
+            <div className="w-16 h-16 border-4 border-slate-100 border-t-[#18222b] rounded-full animate-spin mx-auto mb-4" />
             <h3 className="text-xl font-bold mb-2">Processing...</h3>
-            <p className="text-xs text-slate-500 mb-4">Securing your document for review</p>
             <div className="w-full bg-slate-100 rounded-full h-2 mb-4">
               <div 
-                className="bg-[var(--accent)] h-2 rounded-full transition-all duration-300" 
+                className="bg-[#18222b] h-2 rounded-full transition-all duration-300" 
                 style={{ width: `${uploadProgress}%` }}
               />
             </div>
-            <span className="text-sm font-bold text-[var(--accent)]">{uploadProgress}% Complete</span>
+            <span className="text-sm font-bold text-[#18222b]">{uploadProgress}% Complete</span>
           </div>
         </div>
       )}
@@ -114,40 +109,39 @@ export default function Home() {
         <button onClick={() => setTheme("alt2")} className="px-3 py-1 bg-slate-900 text-white text-[10px] rounded">C</button>
       </div>
 
-      {/* HEADER */}
+      {/* HEADER: Broader for Theme A */}
       <header className={`bg-slate-900 border-b border-slate-700 sticky top-0 z-40 transition-all ${theme === 'default' ? 'py-10' : 'py-4'}`}>
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           {theme !== "alt1" ? (
             <img 
-              src="/logo.jpeg" 
-              alt="Accucert" 
-              className={`w-auto transition-all ${theme === 'default' ? 'h-16' : 'h-8'}`} 
+                src="/logo.jpeg" 
+                alt="Accucert" 
+                className={`w-auto transition-all ${theme === 'default' ? 'h-20' : 'h-8'}`} 
             />
           ) : <div className="w-8" />}
           
-          <nav className="hidden md:flex gap-10 text-sm font-bold text-slate-200">
-            <a href="#services" className="hover:text-[var(--accent)] transition">Services</a>
-            <a href="#how-it-works" className="hover:text-[var(--accent)] transition">How It Works</a>
-            <a href="#contact" className="hover:text-[var(--accent)] transition">Contact</a>
+          <nav className={`hidden md:flex gap-8 font-medium text-slate-200 ${theme === 'default' ? 'text-lg gap-12' : 'text-sm'}`}>
+            <a href="#services" className="hover:text-white transition">Services</a>
+            <a href="#how-it-works" className="hover:text-white transition">How It Works</a>
+            <a href="#contact" className="hover:text-white transition">Contact</a>
           </nav>
-          <button onClick={handleUploadClick} className="bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white px-6 py-3 rounded-md text-sm font-bold uppercase tracking-wider">
+          <button onClick={handleUploadClick} className="bg-[#18222b] border border-slate-600 hover:bg-slate-800 transition text-white px-5 py-2 rounded-md text-sm font-semibold">
             Get Started
           </button>
         </div>
       </header>
 
       {/* HERO SECTION */}
-      <section className={`${isLightHero ? "bg-white" : "bg-slate-900"} py-24 relative z-10`}>
+      <section className={`${isLightHero ? "bg-white" : "bg-slate-900"} py-24 relative z-10 border-b border-slate-100`}>
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-16 items-center">
           <div>
-            {theme === "alt1" && <img src="/logo.jpeg" alt="Accucert" className="h-12 mb-8 block" />}
-            
+            {theme === "alt1" && <img src="/logo.jpeg" alt="Accucert" className="h-10 mb-6" />}
             <span className="inline-block bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-6">
               Trusted by 10,000+ Clients Worldwide
             </span>
             <h1 className={`text-5xl font-extrabold mb-6 leading-tight ${isLightHero ? "text-slate-900" : "text-white"}`}>
               Official Document <br />
-              <span className="text-[var(--accent)]">Translation</span> You Can Trust
+              <span className="text-[#18222b]">Translation</span> You Can Trust
             </h1>
             
             <div className="mb-6 max-w-sm">
@@ -157,24 +151,24 @@ export default function Home() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="email@example.com"
-                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[var(--accent)] outline-none text-slate-900 font-medium"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#18222b] outline-none text-slate-900"
               />
             </div>
 
-            <button onClick={handleUploadClick} className="bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white px-10 py-5 rounded-xl font-bold text-lg shadow-2xl shadow-[var(--accent)]/30">
+            <button onClick={handleUploadClick} className="bg-[#18222b] hover:opacity-90 transition text-white px-8 py-4 rounded-md font-bold text-lg shadow-xl shadow-[#18222b]/20">
               Upload Document
             </button>
           </div>
 
-          <div className="bg-slate-100 rounded-[3rem] p-8 text-slate-800 shadow-inner">
-            <div className="bg-white rounded-[2rem] p-16 text-center flex flex-col items-center shadow-sm">
-              <div className="w-20 h-20 bg-[var(--accent)]/10 rounded-3xl flex items-center justify-center mb-6">
-                <svg className="w-10 h-10 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="bg-slate-100 rounded-3xl p-6 text-slate-800">
+            <div className="bg-white rounded-2xl p-16 text-center flex flex-col items-center shadow-sm">
+              <div className="w-16 h-16 bg-[#18222b]/10 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-[#18222b]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <p className="font-bold text-xl mb-2">Professional Certified Review</p>
-              <p className="text-sm text-slate-400">Our expert team verifies every detail for 100% accuracy.</p>
+              <p className="font-bold">Professional Certified Review</p>
+              <p className="text-xs text-slate-500 mt-2">Team-verified translations</p>
             </div>
           </div>
         </div>
@@ -183,76 +177,65 @@ export default function Home() {
       {/* SERVICES SECTION */}
       <section id="services" className="bg-white py-24 relative z-10">
         <div className="max-w-7xl mx-auto px-6 text-center">
-          <div className="w-20 h-1 bg-[var(--accent)] mx-auto mb-6 rounded-full" />
-          <h2 className="text-4xl font-black mb-4">Documents We <span className="text-[var(--accent)]">Translate</span></h2>
+          <div className="w-20 h-1 bg-[#18222b] mx-auto mb-6 rounded-full" />
+          <h2 className="text-4xl font-bold mb-4">Documents We <span className="text-[#18222b]">Translate</span></h2>
           <div className="grid md:grid-cols-3 gap-8 mt-16 text-left">
             {[
-              { t: "Visa Documents", d: "Passports, visas, and immigration paperwork.", i: <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /> },
-              { t: "Birth Certificates", d: "Birth, death, and adoption records.", i: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /> },
-              { t: "Court Submissions", d: "Legal transcripts and witness statements.", i: <><circle cx="6" cy="18" r="3" /><circle cx="18" cy="18" r="3" /><path d="M12 2v20M2 12h20" /></> },
-              { t: "Academic Records", d: "Diplomas, transcripts, and certificates.", i: <><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></> },
-              { t: "Marriage Certificates", d: "Marriage and divorce official decrees.", i: <><circle cx="8" cy="8" r="6" /><circle cx="16" cy="16" r="6" /></> },
-              { t: "Business Documents", d: "Contracts, patents, and articles of association.", i: <><rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></> }
+              { t: "Visa Documents", i: <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /> },
+              { t: "Birth Certificates", i: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /> },
+              { t: "Court Submissions", i: <><circle cx="6" cy="18" r="3" /><circle cx="18" cy="18" r="3" /><path d="M12 2v20M2 12h20" /></> },
+              { t: "Academic Records", i: <><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></> },
+              { t: "Marriage Certificates", i: <><circle cx="8" cy="8" r="6" /><circle cx="16" cy="16" r="6" /></> },
+              { t: "Business Documents", i: <><rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></> }
             ].map((item) => (
-              <div key={item.t} className="bg-slate-50 p-10 rounded-3xl border border-slate-100 hover:border-[var(--accent)] hover:shadow-xl transition-all group relative overflow-hidden">
-                <div className="mb-6 inline-block p-4 bg-white rounded-2xl shadow-sm text-[var(--accent)] group-hover:bg-[var(--accent)] group-hover:text-white transition-all">
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                    {item.i}
-                  </svg>
+              <div key={item.t} className="bg-slate-50 p-8 rounded-2xl border border-slate-100 hover:border-[#18222b] transition-all group">
+                <div className="w-12 h-12 mb-4 text-[#18222b]">
+                   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">{item.i}</svg>
                 </div>
-                <h3 className="font-bold text-lg mb-2">{item.t}</h3>
-                <p className="text-sm text-slate-500 leading-relaxed">{item.d}</p>
+                <h3 className="font-bold mb-2">{item.t}</h3>
+                <p className="text-sm text-slate-500">Official certified translation for legal use.</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* HOW IT WORKS SECTION */}
-      <section id="how-it-works" className="py-32 bg-slate-900 text-white relative z-10">
+      {/* HOW IT WORKS: ORIGINAL STYLING RESTORED */}
+      <section id="how-it-works" className="py-24 bg-slate-50 relative z-10">
         <div className="max-w-7xl mx-auto px-6 text-center">
-          <h2 className="text-4xl font-black mb-20 uppercase tracking-widest">Our Professional <span className="text-[var(--accent)]">Process</span></h2>
-          <div className="grid md:grid-cols-3 gap-16 relative">
-            <div className="hidden md:block absolute top-10 left-[20%] right-[20%] h-0.5 border-t border-dashed border-slate-700 z-0"></div>
+          <h2 className="text-4xl font-bold mb-16">
+            How It <span className="text-[#18222b]">Works</span>
+          </h2>
+          <div className="grid md:grid-cols-3 gap-12">
             {[
-              { step: "Upload", desc: "Submit your document securely via our encrypted portal." },
-              { step: "Professional Review", desc: "Our expert linguists manually verify all extracted data for total precision." },
-              { step: "Secure Delivery", desc: "Receive your certified, legally-recognized PDF directly via email." }
+              { step: "Upload", desc: "Select your files safely." },
+              { step: "Professional Review", desc: "Manual verification of all details." },
+              { step: "Secure Delivery", desc: "Certified PDF via email." }
             ].map((item, i) => (
-              <div key={item.step} className="relative z-10">
-                <div className="text-8xl font-black text-white opacity-[0.05] absolute -top-12 left-1/2 -translate-x-1/2 select-none">0{i + 1}</div>
-                <div className="w-16 h-16 bg-[var(--accent)] rounded-full flex items-center justify-center font-bold text-xl mx-auto mb-6 shadow-lg shadow-[var(--accent)]/20">
-                  {i + 1}
-                </div>
-                <h3 className="font-bold text-xl mb-4">{item.step}</h3>
-                <p className="text-slate-400 text-sm leading-relaxed max-w-[250px] mx-auto">{item.desc}</p>
+              <div key={item.step}>
+                <div className="text-6xl font-black text-[#18222b] opacity-20 mb-4">0{i + 1}</div>
+                <h3 className="font-bold text-xl mb-2">{item.step}</h3>
+                <p className="text-slate-600">{item.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* FOOTER */}
-      <footer className="bg-slate-900 text-slate-300 border-t border-slate-800 relative z-10">
-        <div className="max-w-7xl mx-auto px-6 py-20 grid md:grid-cols-4 gap-12 text-sm text-center md:text-left">
+      {/* FOOTER: ORIGINAL STYLING RESTORED */}
+      <footer className="bg-slate-900 text-slate-300 border-t border-slate-700 relative z-10">
+        <div className="max-w-7xl mx-auto px-6 py-16 grid md:grid-cols-4 gap-8 text-sm">
           <div className="col-span-2">
-            <img src="/logo.jpeg" className="h-10 mb-6 mx-auto md:mx-0" />
-            <p className="max-w-xs mx-auto md:mx-0 leading-relaxed opacity-60 italic font-medium">
-              Official certified translations for worldwide use. High-accuracy legal processing.
-            </p>
+            <img src="/logo.jpeg" className="h-7 mb-4" />
+            <p className="max-w-sm">Certified translations for official documents worldwide using secure technology.</p>
           </div>
-          <div className="space-y-4">
-             <h4 className="text-white font-bold uppercase tracking-widest text-xs">Navigation</h4>
-             <a href="#services" className="block hover:text-white transition">Services</a>
-             <a href="#how-it-works" className="block hover:text-white transition">How it Works</a>
-          </div>
-          <div className="space-y-4">
-             <h4 className="text-white font-bold uppercase tracking-widest text-xs">Support</h4>
-             <p className="block">support@accucert.com</p>
-             <p className="block">Available 24/7</p>
+          <div className="space-y-2">
+            <h4 className="text-white font-bold mb-4 text-xs uppercase tracking-widest">Navigation</h4>
+            <a href="#services" className="block hover:text-white transition">Services</a>
+            <a href="#how-it-works" className="block hover:text-white transition">How it Works</a>
           </div>
         </div>
-        <div className="text-center text-[10px] uppercase tracking-[0.2em] text-slate-600 py-10 border-t border-slate-800/50">
+        <div className="text-center text-xs text-slate-500 py-8 border-t border-slate-800">
           © 2026 Accucert. All rights reserved.
         </div>
       </footer>
