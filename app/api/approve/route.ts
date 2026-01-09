@@ -8,12 +8,12 @@ export async function POST(req: Request) {
   try {
     const { requestId, email } = await req.json();
 
-    // 1. GET & VALIDATE VARIABLES (With trimming to remove hidden spaces)
+    // 1. GET & VALIDATE VARIABLES
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     const resendKey = process.env.RESEND_API_KEY?.trim();
 
-    // Log the health check to Vercel Function Logs
+    // Audit Log for Debugging
     console.log("Approval API Audit:", {
       hasUrl: !!supabaseUrl,
       hasServiceKey: !!supabaseKey,
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
     if (!supabaseUrl || !supabaseUrl.startsWith("https://")) {
       return new Response(
-        JSON.stringify({ error: "Invalid or missing Supabase URL configuration." }), 
+        JSON.stringify({ error: "Invalid Supabase configuration." }), 
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -45,11 +45,13 @@ export async function POST(req: Request) {
       throw new Error("Could not find translation request in database.");
     }
 
-    // 4. GENERATE THE CERTIFIED PDF
-    // This is the manual review part—it uses the extracted_text saved in DB
+    // 4. GENERATE THE CERTIFIED PDF (Updated for Request 3)
+    // We now pass fullName and orderId so Page 1 of the PDF is personalized
     const pdfBytes = await generateCertifiedPdf({
       originalFilename: translation.filename,
       extractedText: translation.extracted_text,
+      fullName: translation.full_name || "Valued Client",
+      orderId: translation.id
     });
 
     // 5. SEND EMAIL WITH ATTACHMENT
@@ -58,21 +60,25 @@ export async function POST(req: Request) {
       to: email,
       subject: `Approved: Certified Translation for ${translation.filename}`,
       html: `
-        <div style="font-family: sans-serif; color: #333; line-height: 1.6;">
-          <h2 style="color: #1a2a3a;">Your Certified Translation is Ready</h2>
-          <p>Hello,</p>
-          <p>Our professional review team has completed the certification of <strong>${translation.filename}</strong>.</p>
-          <p>Please find your certified PDF translation attached to this email.</p>
+        <div style="font-family: sans-serif; color: #18222b; line-height: 1.6; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+          <h2 style="color: #18222b; border-bottom: 2px solid #18222b; padding-bottom: 10px;">Official Translation Ready</h2>
+          <p>Hello <strong>${translation.full_name}</strong>,</p>
+          <p>Our professional review team has completed the certification of your document: <strong>${translation.filename}</strong>.</p>
+          <p>Please find your official <strong>Certified PDF Package</strong> attached to this email. This package includes:</p>
+          <ul>
+            <li>Certificate of Translation Accuracy</li>
+            <li>Certified Translation Text</li>
+          </ul>
           <br />
           <p>Thank you for choosing Accucert.</p>
           <hr style="border:none; border-top:1px solid #eee;" />
-          <p style="font-size: 11px; color: #999;">Accucert Professional Translation Services</p>
+          <p style="font-size: 11px; color: #999;">Accucert Professional Translation Services | Order ID: ${translation.id.slice(0,8)}</p>
         </div>
       `,
       attachments: [
         {
-          filename: `certified-${translation.filename}.pdf`,
-          content: Buffer.from(pdfBytes),
+          filename: `Certified_Translation_${translation.filename}.pdf`,
+          content: Buffer.from(pdfBytes).toString("base64"), // Convert to Base64 for Resend
         },
       ],
     });
