@@ -20,7 +20,6 @@ export async function generateCertifiedPdf({
   pdfDoc.registerFontkit(fontkit);
 
   // --- ROBUST FONT PATH RESOLUTION ---
-  // Using path.join with process.cwd() and checking existence for Vercel stability
   const fontPath = path.join(process.cwd(), 'public', 'fonts', 'NotoSans-Regular.ttf');
   
   if (!fs.existsSync(fontPath)) {
@@ -57,7 +56,6 @@ I further certify that, to the best of my knowledge and belief, the translation 
     x: 50, y: height - 180, size: 11, font, maxWidth: width - 100, lineHeight: 18
   });
 
-  // Load and draw Signature if exists
   if (fs.existsSync(sigPath)) {
     const sigBytes = fs.readFileSync(sigPath);
     const sigImage = await pdfDoc.embedPng(sigBytes);
@@ -68,7 +66,6 @@ I further certify that, to the best of my knowledge and belief, the translation 
   cover.drawText("Authorized Reviewer", { x: 50, y: height - 445, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
   cover.drawText("Accucert Professional Services", { x: 50, y: height - 458, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
 
-  // Load and draw Seal if exists
   if (fs.existsSync(sealPath)) {
     const sealBytes = fs.readFileSync(sealPath);
     const sealImage = await pdfDoc.embedPng(sealBytes);
@@ -82,6 +79,13 @@ I further certify that, to the best of my knowledge and belief, the translation 
     .replace(/<\/p>/g, '\n')
     .replace(/<br\s*\/?>/g, '\n')
     .replace(/<[^>]+>/g, '')
+    // --- NEW: DECODE HTML ENTITIES ---
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .split('\n')
     .filter(line => line.trim().length > 0);
 
