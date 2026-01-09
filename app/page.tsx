@@ -6,15 +6,23 @@ export default function Home() {
   const [theme, setTheme] = useState("default");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  
+  // Client Data Capture States
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState(""); 
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState(""); // Optional
+  const [serviceLevel, setServiceLevel] = useState("standard");
+  const [urgency, setUrgency] = useState("normal");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const isLightHero = theme === "default" || theme === "alt2";
 
   const handleUploadClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (!email || !email.includes("@")) {
-      alert("Please enter a valid email address first so we can send you the translation.");
+    if (!fullName || !email || !email.includes("@") || !phone) {
+      alert("Please enter your Name, Email, and Phone Number first so we can process your order.");
       return;
     }
     fileInputRef.current?.click();
@@ -29,7 +37,12 @@ export default function Home() {
 
     const formData = new FormData();
     formData.append("file", file); 
+    formData.append("fullName", fullName);
     formData.append("email", email); 
+    formData.append("phone", phone);
+    formData.append("address", address);
+    formData.append("serviceLevel", serviceLevel);
+    formData.append("urgency", urgency);
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload", true);
@@ -43,16 +56,15 @@ export default function Home() {
 
     xhr.onload = async () => {
       if (xhr.status === 200) {
-        alert("Success! We have received your document. Our team will review it and email the certified translation to " + email);
-        setEmail(""); 
-        setIsUploading(false);
-      } else {
-        try {
-          const errorData = JSON.parse(xhr.responseText);
-          alert(`Upload failed: ${errorData.error || "Unknown error"}`);
-        } catch {
-          alert("Upload failed. Please check your file size (Max 4.5MB).");
+        const response = JSON.parse(xhr.responseText);
+        if (response.stripeUrl) {
+          window.location.href = response.stripeUrl;
+        } else {
+          alert("Order created successfully!");
+          setIsUploading(false);
         }
+      } else {
+        alert("Upload failed. Please check your connection or file size.");
         setIsUploading(false);
       }
     };
@@ -68,12 +80,19 @@ export default function Home() {
   return (
     <main data-theme={theme} className="min-h-screen bg-slate-50 text-slate-800 relative">
       
-      {/* THEME C WATERMARK */}
+      {/* THEME C: UPDATED FULL PAGE WATERMARK */}
       {theme === "alt2" && (
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden flex flex-wrap justify-center items-center opacity-[0.03]">
-          {Array.from({ length: 20 }).map((_, i) => (
-            <span key={i} className="text-9xl font-black -rotate-12 uppercase m-20 select-none tracking-tighter">Accucert</span>
-          ))}
+        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none opacity-[0.03]">
+          <div className="absolute inset-0 grid grid-cols-2 md:grid-cols-4 gap-10 p-10">
+            {Array.from({ length: 40 }).map((_, i) => (
+              <span 
+                key={i} 
+                className="text-7xl font-black -rotate-12 uppercase tracking-tighter whitespace-nowrap"
+              >
+                Accucert
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
@@ -140,20 +159,55 @@ export default function Home() {
               <span className="text-[var(--accent)]">Translation</span> You Can Trust
             </h1>
 
-            <div className="mb-6 max-w-sm">
-              <label className={`block text-xs font-bold uppercase mb-2 ${isLightHero ? 'text-slate-400' : 'text-slate-500'}`}>Enter Email for Delivery</label>
+            {/* ORDER FORM */}
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3 max-w-md">
               <input 
-                type="email" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="email@example.com"
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-[var(--accent)] outline-none text-slate-900"
+                type="text" placeholder="Full Name" value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-[var(--accent)] text-sm"
               />
-            </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <input 
+                  type="email" placeholder="Email" value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="p-3 bg-white border border-slate-200 rounded-lg outline-none text-sm"
+                />
+                <input 
+                  type="tel" placeholder="Phone" value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="p-3 bg-white border border-slate-200 rounded-lg outline-none text-sm"
+                />
+              </div>
 
-            <button onClick={handleUploadClick} className="bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white px-8 py-4 rounded-md font-bold text-lg shadow-xl shadow-[var(--accent)]/20">
-              Upload Document
-            </button>
+              <input 
+                type="text" placeholder="Postal Address (Optional)" value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none text-sm"
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <select 
+                  value={serviceLevel} onChange={(e) => setServiceLevel(e.target.value)}
+                  className="p-3 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
+                >
+                  <option value="standard">Standard Translation</option>
+                  <option value="certified">Certified Translation</option>
+                  <option value="notarized">Notarized Translation</option>
+                </select>
+                <select 
+                  value={urgency} onChange={(e) => setUrgency(e.target.value)}
+                  className="p-3 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
+                >
+                  <option value="normal">Standard (3-5 Days)</option>
+                  <option value="expedited">Expedited (24 Hours)</option>
+                </select>
+              </div>
+
+              <button onClick={handleUploadClick} className="w-full bg-[var(--accent)] hover:bg-[var(--cta-hover)] transition text-white py-4 rounded-lg font-bold shadow-lg shadow-[var(--accent)]/20">
+                Upload & Submit Order
+              </button>
+            </div>
           </div>
 
           <div className="bg-slate-100 rounded-3xl p-6 text-slate-800">
@@ -225,7 +279,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* SECTION 4: CTA (Restored) */}
+      {/* SECTION 4: CTA */}
       <section className="bg-white py-24 relative z-10">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <div className="rounded-3xl border border-slate-200 p-16 bg-slate-50 shadow-sm">

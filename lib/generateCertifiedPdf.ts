@@ -1,8 +1,11 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
+import fontkit from '@pdf-lib/fontkit';
+import fs from 'fs';
+import path from 'path';
 
 type GeneratePdfInput = {
   originalFilename: string;
-  extractedText: string;
+  extractedText: string; // This is now HTML from React-Quill
 };
 
 export async function generateCertifiedPdf({
@@ -10,11 +13,17 @@ export async function generateCertifiedPdf({
   extractedText,
 }: GeneratePdfInput): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold); // Added bold for emphasis
+  
+  // 1. REGISTER FONTKIT & LOAD UNICODE FONT
+  // This prevents the "WinAnsi cannot encode" error for Tibetan/Hindi/etc.
+  pdfDoc.registerFontkit(fontkit);
+  const fontPath = path.join(process.cwd(), 'public/fonts/NotoSans-Regular.ttf');
+  const fontBytes = fs.readFileSync(fontPath);
+  const font = await pdfDoc.embedFont(fontBytes);
+  const fontBold = await pdfDoc.embedFont(fontBytes); // Using same font for consistency
 
   /* ===============================
-     PAGE 1 — CERTIFICATION PAGE
+     PAGE 1 — CERTIFICATION PAGE (Cover)
   =============================== */
   const cover = pdfDoc.addPage([595, 842]); // A4
   const { height, width } = cover.getSize();
@@ -24,6 +33,7 @@ export async function generateCertifiedPdf({
     y: height - 80,
     size: 26,
     font: fontBold,
+    color: rgb(0.09, 0.13, 0.17), // Accucert Blue #18222b
   });
 
   cover.drawText(
@@ -38,15 +48,14 @@ export async function generateCertifiedPdf({
     }
   );
 
-  // ✅ ADDED: AUTOMATED TRANSLATION DISCLAIMER
   cover.drawText(
-    "Note: This is an automated translation generated via Accucert AI technology for review purposes.",
+    "Note: This document has been professionally reviewed and certified by the Accucert team.",
     {
       x: 50,
       y: height - 185,
       size: 10,
       font,
-      color: rgb(0.4, 0.4, 0.4), // Professional Grey
+      color: rgb(0.4, 0.4, 0.4),
     }
   );
 
@@ -57,7 +66,8 @@ export async function generateCertifiedPdf({
     font,
   });
 
-  cover.drawText("Accucert — Official Certified Translations", {
+  // Stamp-like branding at bottom
+  cover.drawText("Accucert — Official Certified Document", {
     x: 50,
     y: 60,
     size: 10,
@@ -66,14 +76,17 @@ export async function generateCertifiedPdf({
   });
 
   /* ===============================
-     PAGE 2+ — EXTRACTED & TRANSLATED TEXT
+     PAGE 2+ — FORMATTED TRANSLATION
   =============================== */
-  // The rest of your code remains exactly the same...
+  
+  // 2. CLEAN HTML TAGS FROM RICH TEXT EDITOR
+  // This converts the HTML from React-Quill into clean lines for the PDF
   const cleanText = extractedText
-    .replace(/\r/g, "")
-    .split("\n")
-    .map(line => line.trim())
-    .filter(line => line.length > 0);
+    .replace(/<\/p>/g, '\n')       // Paragraphs to new lines
+    .replace(/<br\s*\/?>/g, '\n') // Line breaks to new lines
+    .replace(/<[^>]+>/g, '')      // Remove all other HTML tags
+    .split('\n')
+    .filter(line => line.trim().length > 0);
 
   const fontSize = 11;
   const lineHeight = 16;

@@ -1,6 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 import { runOCR } from "@/lib/ocr"; 
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2025-12-18.acacia" as any, // Use latest stable
+});
 
 export const runtime = "nodejs";
 export const maxDuration = 300; 
@@ -8,92 +13,108 @@ export const maxDuration = 300;
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
+    
     const file = formData.get("file") as File | null;
-    const userEmail = formData.get("email") as string | null;
+    const userEmail = (formData.get("email") as string | null) || "";
+    const fullName = (formData.get("fullName") as string | null) || "";
+    const phone = (formData.get("phone") as string | null) || "";
+    const address = (formData.get("address") as string | null) || "";
+    const serviceLevel = (formData.get("serviceLevel") as string | null) || "standard";
+    const urgency = (formData.get("urgency") as string | null) || "normal";
 
-    if (!file || !userEmail) {
-      return new Response(JSON.stringify({ error: "Missing file or email" }), { status: 400 });
+    if (!file || !userEmail || !fullName) {
+      return new Response(JSON.stringify({ error: "Missing required information" }), { status: 400 });
     }
 
-    // 1. SAFE INITIALIZATION
+    // 1. INITIALIZE CLIENTS
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     const resendKey = process.env.RESEND_API_KEY?.trim();
 
-    if (!supabaseUrl || !supabaseKey || !resendKey) {
-      throw new Error("Server Configuration Error: Missing Environment Variables");
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(supabaseUrl!, supabaseKey!);
     const resend = new Resend(resendKey);
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 2. UPLOAD ORIGINAL TO SUPABASE STORAGE
-    // We create a unique filename to avoid overwriting
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `uploads/${fileName}`;
-
-    const { data: storageData, error: storageError } = await supabase.storage
+    // 2. UPLOAD TO STORAGE
+    const fileName = `${Date.now()}-${file.name}`;
+    await supabase.storage
       .from("documents")
-      .upload(filePath, buffer, {
-        contentType: file.type,
-        upsert: false
-      });
+      .upload(`uploads/${fileName}`, buffer, { contentType: file.type });
 
-    if (storageError) throw new Error(`Storage Error: ${storageError.message}`);
-
-    // Get the Public URL for the image
     const { data: { publicUrl } } = supabase.storage
       .from("documents")
-      .getPublicUrl(filePath);
+      .getPublicUrl(`uploads/${fileName}`);
 
-    // 3. RUN OCR + TRANSLATION
+    // 3. RUN OCR
     const translatedText = await runOCR(buffer);
 
-    // 4. SAVE RECORD TO DATABASE
+    // 4. CALCULATE PRICE (Customizable)
+    let amount = 2500; // Base price £25.00 (in pence)
+    if (serviceLevel === "certified") amount += 2000; // +£20
+    if (urgency === "expedited") amount += 1500; // +£15
+
+    // 5. CREATE STRIPE SESSION
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "gbp",
+            product_data: {
+              name: `${serviceLevel.toUpperCase()} Translation - ${file.name}`,
+              description: `Urgency: ${urgency}`,
+            },
+            unit_amount: amount,
+          },
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      // UPDATE THIS LINE
+      success_url: `${req.headers.get("origin")}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${req.headers.get("origin")}/`,
+      customer_email: userEmail,
+    });
+
+    // 6. SAVE TO DB (Including Stripe ID)
     const { data, error: dbError } = await supabase
       .from("translations")
-      .insert([
-        {
-          filename: file.name,
-          user_email: userEmail,
-          extracted_text: translatedText,
-          status: "pending",
-          image_url: publicUrl // This allows the Admin to see the original image
-        },
-      ])
-      .select()
-      .single();
+      .insert([{
+        filename: file.name,
+        user_email: userEmail,
+        full_name: fullName,
+        phone: phone,
+        postal_address: address,
+        service_level: serviceLevel,
+        urgency: urgency,
+        extracted_text: translatedText,
+        status: "pending",
+        payment_status: "unpaid", // Will be updated via Webhook later
+        stripe_session_id: session.id,
+        image_url: publicUrl
+      }])
+      .select().single();
 
     if (dbError) throw dbError;
 
-    // 5. SEND CONFIRMATION EMAIL
+    // 7. SEND INITIAL EMAIL
     await resend.emails.send({
       from: "Accucert <onboarding@resend.dev>", 
       to: userEmail,
-      subject: "Document Received - Accucert Review Team",
-      html: `
-        <div style="font-family: sans-serif; color: #333;">
-          <h2>Confirmation</h2>
-          <p>We have received <strong>${file.name}</strong> for professional translation review.</p>
-          <p>You will receive your certified PDF via email once our team completes the verification.</p>
-        </div>
-      `,
+      subject: `Order Created: ${fullName}`,
+      html: `<h3>Order Pending Payment</h3><p>Hi ${fullName}, please complete your payment to start the review process.</p>`,
     });
 
-    return new Response(JSON.stringify({ success: true, id: data.id }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    // RETURN THE STRIPE URL FOR FRONT-END REDIRECT
+    return new Response(JSON.stringify({ 
+      success: true, 
+      id: data.id, 
+      stripeUrl: session.url 
+    }), { status: 200 });
 
   } catch (err: any) {
     console.error("UPLOAD ERROR:", err.message);
-    return new Response(JSON.stringify({ error: err.message }), { 
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
   }
 }
