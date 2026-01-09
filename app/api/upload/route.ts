@@ -3,9 +3,8 @@ import { Resend } from "resend";
 import { runOCR } from "@/lib/ocr"; 
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-12-18.acacia" as any, // Use latest stable
-});
+// REMOVED: apiVersion requirement to allow Stripe to use account default
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 export const runtime = "nodejs";
 export const maxDuration = 300; 
@@ -71,7 +70,7 @@ export async function POST(req: Request) {
         },
       ],
       mode: "payment",
-      // UPDATE THIS LINE
+      // Redirects to your new Success page with Suspense fix
       success_url: `${req.headers.get("origin")}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${req.headers.get("origin")}/`,
       customer_email: userEmail,
@@ -90,9 +89,10 @@ export async function POST(req: Request) {
         urgency: urgency,
         extracted_text: translatedText,
         status: "pending",
-        payment_status: "unpaid", // Will be updated via Webhook later
+        payment_status: "unpaid",
         stripe_session_id: session.id,
-        image_url: publicUrl
+        image_url: publicUrl,
+        version_history: [] // Ensure JSONB column starts empty
       }])
       .select().single();
 
