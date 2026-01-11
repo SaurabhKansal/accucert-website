@@ -1,12 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // This ensures Vercel bundles your fonts and images with your API functions
+  // 1. Prevents bundling errors for these heavy packages
+  serverExternalPackages: ['puppeteer-core', '@sparticuz/chromium'],
+  
+  // 2. FORCES Vercel to include the Chromium binaries in the API routes
   outputFileTracingIncludes: {
-    '/api/**/*': ['./public/fonts/**/*', './public/*.png'],
+    '/api/**/*': [
+      './node_modules/@sparticuz/chromium/bin/**/*'
+    ],
   },
-  // Since we are using pdf-lib and fontkit (which use Node.js features)
-  serverExternalPackages: ['pdf-lib', '@pdf-lib/fontkit'],
 };
 
 export default nextConfig;

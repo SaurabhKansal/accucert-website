@@ -15,20 +15,20 @@ export async function generateCertifiedPdf({
   orderId
 }: GeneratePdfInput): Promise<Buffer> {
   
-  // 1. FIXED LAUNCH LOGIC
-  // Removed 'chromium.defaultViewport' and 'chromium.headless' to fix TS errors.
+  // 1. LAUNCH ENGINE
+  // Explicitly setting headless: true to avoid TS errors on the 'chromium' object
   const browser = await puppeteer.launch({
     args: chromium.args,
     executablePath: await chromium.executablePath(),
-    headless: true, // Manually set to true for serverless stability
+    headless: true, 
   });
 
   const page = await browser.newPage();
   
-  // Set A4 dimensions (72 DPI) manually here instead of in launch options
+  // Set A4 dimensions (72 DPI) manually here
   await page.setViewport({ width: 794, height: 1123 });
 
-  // 2. BUILD THE "MIRROR" HTML TEMPLATE
+  // 2. DESIGN-PROOF HTML TEMPLATE
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -60,6 +60,7 @@ export async function generateCertifiedPdf({
             font-size: 13px; 
             line-height: 1.5; 
           }
+          /* Support for tables in the editor to mirror the Spanish certificate layout */
           table { width: 100%; border-collapse: collapse; margin-top: 15px; }
           table, th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
           
@@ -106,9 +107,10 @@ export async function generateCertifiedPdf({
     </html>
   `;
 
+  // Use 'networkidle0' to ensure any external layouts or fonts finish loading
   await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 
-  // 3. GENERATE THE PDF
+  // 3. GENERATE PDF
   const pdfBuffer = await page.pdf({
     format: 'A4',
     printBackground: true,
