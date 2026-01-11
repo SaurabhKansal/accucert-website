@@ -25,13 +25,17 @@ export default function AdminDashboard() {
   const [selectedReq, setSelectedReq] = useState<any>(null);
   const [editText, setEditText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
 
+  // Advanced modules to support tables, colors, and layouts for "Mirror" documents
   const modules = useMemo(() => ({
     toolbar: [
-      [{ 'header': [1, 2, false] }],
-      ['bold', 'italic', 'underline'],
-      [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+      [{ 'header': [1, 2, 3, false] }],
+      ['bold', 'italic', 'underline', 'strike'],
+      [{ 'color': [] }, { 'background': [] }],
       [{ 'align': [] }],
+      [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+      ['table'], 
       ['clean']
     ],
   }), []);
@@ -55,16 +59,45 @@ export default function AdminDashboard() {
 
   const openReview = (req: any) => {
     setSelectedReq(req);
-    // Ensure content is treated as HTML
     const content = req.extracted_text?.includes('<') 
       ? req.extracted_text 
       : `<div>${(req.extracted_text || "").replace(/\n/g, '<br/>')}</div>`;
     setEditText(content);
   };
 
+  // --- PREVIEW HANDLER ---
+  async function handlePreview() {
+    setIsPreviewing(true);
+    try {
+      const res = await fetch("/api/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          requestId: selectedReq.id, 
+          editText: editText 
+        }),
+      });
+
+      if (!res.ok) throw new Error("Preview generation failed");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PREVIEW_${selectedReq.filename}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsPreviewing(false);
+    }
+  }
+
   async function handleSaveDraft() {
     const newHistory = [...(selectedReq.version_history || []), {
-      text: selectedReq.extracted_text,
+      text: editText,
       timestamp: new Date().toISOString()
     }];
 
@@ -84,6 +117,9 @@ export default function AdminDashboard() {
         alert("⚠️ UNPAID: Cannot dispatch until payment is confirmed.");
         return;
     }
+    const confirmDispatch = confirm("Are you sure? This will generate the final PDF and email it to the client.");
+    if (!confirmDispatch) return;
+
     setIsProcessing(true);
     try {
       await supabase.from("translations").update({ extracted_text: editText }).eq("id", selectedReq.id);
@@ -142,7 +178,9 @@ export default function AdminDashboard() {
                   </td>
                   <td className="p-6">
                     <div className="text-xs font-bold uppercase">{req.service_level}</div>
-                    <div className="text-[10px] text-red-500 font-bold">{req.urgency === 'expedited' && '⚡ EXPEDITED'}</div>
+                    <div className={`text-[10px] font-bold ${req.urgency === 'expedited' ? 'text-red-500' : 'text-slate-400'}`}>
+                      {req.urgency === 'expedited' ? '⚡ EXPEDITED' : 'Standard'}
+                    </div>
                   </td>
                   <td className="p-6 text-center">
                     <div className="flex flex-col items-center gap-1">
@@ -153,7 +191,7 @@ export default function AdminDashboard() {
                     </div>
                   </td>
                   <td className="p-6">
-                    <button onClick={() => openReview(req)} className="bg-slate-900 text-white px-6 py-2 rounded-xl text-xs font-bold hover:bg-slate-700">
+                    <button onClick={() => openReview(req)} className="bg-slate-900 text-white px-6 py-2 rounded-xl text-xs font-bold hover:bg-slate-700 transition">
                       Review
                     </button>
                   </td>
@@ -164,45 +202,67 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* REVIEW MODAL */}
+      {/* REVIEW MODAL - Side-by-Side "Mirror" Layout */}
       {selectedReq && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-[95vw] h-[90vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden">
-            <div className="p-8 border-b flex justify-between items-center bg-white">
-              <h2 className="text-2xl font-black italic">ORDER_REVIEW: {selectedReq.filename}</h2>
-              <button onClick={() => setSelectedReq(null)} className="text-2xl">✕</button>
+          <div className="bg-white w-full max-w-[98vw] h-[95vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-6 border-b flex justify-between items-center bg-white">
+              <h2 className="text-2xl font-black italic uppercase tracking-tighter">Mirror_Review: {selectedReq.filename}</h2>
+              <button onClick={() => setSelectedReq(null)} className="text-2xl hover:text-red-500 transition">✕</button>
             </div>
 
             <div className="flex-1 overflow-hidden grid md:grid-cols-2">
-              <div className="bg-slate-100 p-8 overflow-auto flex justify-center border-r">
-                <img src={selectedReq.image_url} alt="Reference" className="max-w-full shadow-2xl rounded-lg" />
+              {/* LEFT: SOURCE DOCUMENT */}
+              <div className="bg-slate-800 p-8 overflow-auto flex flex-col items-center border-r border-slate-700">
+                <p className="text-[10px] font-black uppercase text-slate-500 mb-4 self-start tracking-widest">Original Reference</p>
+                <img 
+                  src={selectedReq.image_url} 
+                  alt="Reference" 
+                  className="max-w-full shadow-2xl rounded-sm border-[8px] border-white" 
+                />
               </div>
+
+              {/* RIGHT: MIRROR TRANSLATION EDITOR */}
               <div className="p-8 flex flex-col bg-white overflow-hidden">
-                {/* VERSION HISTORY */}
                 {selectedReq.version_history?.length > 0 && (
                     <div className="mb-4 p-3 bg-slate-50 border rounded-2xl">
                         <p className="text-[9px] font-black text-slate-400 mb-2 uppercase">Restore Draft</p>
-                        <div className="flex gap-2 overflow-x-auto pb-2">
+                        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
                             {selectedReq.version_history.map((v: any, i: number) => (
-                                <button key={i} onClick={() => setEditText(v.text)} className="whitespace-nowrap px-3 py-1 bg-white border rounded-lg text-[10px] hover:border-black">
+                                <button key={i} onClick={() => setEditText(v.text)} className="whitespace-nowrap px-3 py-1 bg-white border rounded-lg text-[10px] font-bold hover:border-black transition">
                                     v{i+1} - {new Date(v.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                 </button>
                             ))}
                         </div>
                     </div>
                 )}
-                <div className="flex-1 overflow-auto border rounded-[2rem] bg-slate-50">
+                <div className="flex-1 overflow-auto border-2 border-slate-100 rounded-[2rem] bg-slate-50 shadow-inner">
                   <ReactQuill theme="snow" value={editText} onChange={setEditText} modules={modules} className="h-full" />
                 </div>
               </div>
             </div>
 
             <div className="p-8 border-t bg-slate-50 flex justify-between items-center">
-               <button onClick={handleSaveDraft} className="text-xs font-bold text-slate-400 hover:text-slate-900">Save Draft (New Version)</button>
+               <div className="flex gap-6 items-center">
+                  <button onClick={handleSaveDraft} className="text-xs font-bold text-slate-400 hover:text-slate-900 transition">
+                    💾 Save Progress Snapshot
+                  </button>
+                  <button 
+                    onClick={handlePreview} 
+                    disabled={isPreviewing}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 transition flex items-center gap-2"
+                  >
+                    {isPreviewing ? "Building PDF..." : "👁️ Download Preview PDF"}
+                  </button>
+               </div>
                <div className="flex gap-4">
-                  <button onClick={() => setSelectedReq(null)} className="font-bold text-slate-400">Cancel</button>
-                  <button onClick={handleFinalApprove} disabled={isProcessing || selectedReq.payment_status !== 'paid'} className="bg-slate-900 text-white px-12 py-4 rounded-2xl font-black text-xs disabled:opacity-30">
-                    {isProcessing ? "PROCESSING..." : "APPROVE & DISPATCH"}
+                  <button onClick={() => setSelectedReq(null)} className="font-bold text-slate-400 px-4">Cancel</button>
+                  <button 
+                    onClick={handleFinalApprove} 
+                    disabled={isProcessing || selectedReq.payment_status !== 'paid'} 
+                    className="bg-[#18222b] text-white px-12 py-4 rounded-2xl font-black text-xs hover:shadow-2xl transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    {isProcessing ? "DISPATCHING..." : "CERTIFY & DISPATCH"}
                   </button>
                </div>
             </div>

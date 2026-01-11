@@ -1,11 +1,9 @@
-import { PDFDocument, rgb } from "pdf-lib";
-import fontkit from '@pdf-lib/fontkit';
-import fs from 'fs';
-import path from 'path';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 
 type GeneratePdfInput = {
   originalFilename: string;
-  extractedText: string;
+  extractedText: string; 
   fullName: string;
   orderId: string;
 };
@@ -15,113 +13,109 @@ export async function generateCertifiedPdf({
   extractedText,
   fullName,
   orderId
-}: GeneratePdfInput): Promise<Uint8Array> {
-  const pdfDoc = await PDFDocument.create();
-  pdfDoc.registerFontkit(fontkit);
-
-  // --- ROBUST FONT PATH RESOLUTION ---
-  const fontPath = path.join(process.cwd(), 'public', 'fonts', 'NotoSans-Regular.ttf');
+}: GeneratePdfInput): Promise<Buffer> {
   
-  if (!fs.existsSync(fontPath)) {
-    throw new Error(`Critical Error: Font file missing at ${fontPath}. Ensure it is in public/fonts/`);
-  }
-
-  const fontBytes = fs.readFileSync(fontPath);
-  const font = await pdfDoc.embedFont(fontBytes);
-  const fontBold = await pdfDoc.embedFont(fontBytes);
-
-  // --- ASSET LOADING (Seal & Signature) ---
-  const sealPath = path.join(process.cwd(), 'public', 'seal.png');
-  const sigPath = path.join(process.cwd(), 'public', 'signature.png');
-
-  /* ===============================
-     PAGE 1 — CERTIFICATION LETTER
-  =============================== */
-  const cover = pdfDoc.addPage([595, 842]);
-  const { height, width } = cover.getSize();
-
-  cover.drawText("CERTIFICATE OF TRANSLATION ACCURACY", {
-    x: 50, y: height - 80, size: 20, font: fontBold, color: rgb(0.09, 0.13, 0.17)
+  // FIXED INITIALIZATION: 
+  // Removed 'chromium.headless' and 'chromium.defaultViewport' 
+  // to satisfy current TypeScript definitions.
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless: true, // Manually set to true for serverless execution
   });
 
-  const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  cover.drawText(`Certificate No: AC-${orderId.slice(-6).toUpperCase()}`, { x: 50, y: height - 110, size: 10, font });
-  cover.drawText(`Date of Issue: ${date}`, { x: 50, y: height - 125, size: 10, font });
+  const page = await browser.newPage();
+  
+  // Set A4 dimensions for high-fidelity rendering
+  await page.setViewport({ width: 794, height: 1123 });
 
-  const bodyText = `I, the undersigned authorized representative of Accucert, hereby certify that the attached document "${originalFilename}" has been translated from its original language into English by a qualified professional linguist.
+  // Build the "Mirror" HTML Template
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
+          body { 
+            font-family: 'Noto Sans', sans-serif; 
+            padding: 0; 
+            margin: 0;
+            color: #18222b; 
+          }
+          .cert-container { 
+            border: 12px double #18222b; 
+            margin: 20px;
+            padding: 40px; 
+            min-height: 1040px; 
+            position: relative;
+            box-sizing: border-box;
+          }
+          .cert-header { 
+            text-align: center; 
+            border-bottom: 2px solid #18222b; 
+            margin-bottom: 30px; 
+            padding-bottom: 10px; 
+          }
+          .translation-body { 
+            font-size: 13px; 
+            line-height: 1.5; 
+          }
+          /* Ensure editor-generated tables look professional */
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+          table, th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+          
+          .cert-footer { 
+            position: absolute; 
+            bottom: 40px; 
+            left: 40px; 
+            right: 40px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-end; 
+          }
+        </style>
+      </head>
+      <body>
+        <div class="cert-container">
+          <div class="cert-header">
+            <h1 style="margin: 0; font-size: 24px; letter-spacing: 1px;">CERTIFICATE OF TRANSLATION ACCURACY</h1>
+            <p style="margin: 5px 0 0; font-size: 10px; font-weight: bold;">ORDER ID: ${orderId.slice(-8).toUpperCase()}</p>
+          </div>
 
-I further certify that, to the best of my knowledge and belief, the translation is a true, accurate, and complete rendering of the original document provided by the client, ${fullName}.`;
+          <p style="font-size: 12px; margin-bottom: 20px;">
+            This document certifies that the translation of <strong>${originalFilename}</strong> 
+            provided by <strong>${fullName}</strong> has been reviewed and certified by Accucert.
+          </p>
 
-  cover.drawText(bodyText, {
-    x: 50, y: height - 180, size: 11, font, maxWidth: width - 100, lineHeight: 18
+          <div class="translation-body">
+            ${extractedText}
+          </div>
+
+          <div class="cert-footer">
+            <div>
+              <p style="margin-bottom: 40px;">Certified by Authorized Reviewer:</p>
+              <p style="border-top: 1px solid #000; display: inline-block; padding-top: 5px; width: 250px;">
+                <strong>Accucert Professional Services</strong>
+              </p>
+            </div>
+            <div style="text-align: right; color: #ccc; font-size: 10px; border: 1px dashed #ccc; padding: 15px;">
+              [ OFFICIAL SEAL ]
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+
+  // Generate High-Quality PDF
+  const pdfBuffer = await page.pdf({
+    format: 'A4',
+    printBackground: true,
+    margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' }
   });
 
-  if (fs.existsSync(sigPath)) {
-    const sigBytes = fs.readFileSync(sigPath);
-    const sigImage = await pdfDoc.embedPng(sigBytes);
-    cover.drawImage(sigImage, { x: 50, y: height - 420, width: 120, height: 50 });
-  }
-
-  cover.drawText("________________________", { x: 50, y: height - 430, size: 12, font });
-  cover.drawText("Authorized Reviewer", { x: 50, y: height - 445, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
-  cover.drawText("Accucert Professional Services", { x: 50, y: height - 458, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
-
-  if (fs.existsSync(sealPath)) {
-    const sealBytes = fs.readFileSync(sealPath);
-    const sealImage = await pdfDoc.embedPng(sealBytes);
-    cover.drawImage(sealImage, { x: width - 180, y: height - 460, width: 130, height: 130, opacity: 0.8 });
-  }
-
-  /* ===============================
-     PAGE 2+ — FORMATTED CONTENT
-  =============================== */
-  const cleanText = extractedText
-    .replace(/<\/p>/g, '\n')
-    .replace(/<br\s*\/?>/g, '\n')
-    .replace(/<[^>]+>/g, '')
-    // --- NEW: DECODE HTML ENTITIES ---
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .split('\n')
-    .filter(line => line.trim().length > 0);
-
-  let page = pdfDoc.addPage([595, 842]);
-  let y = page.getHeight() - 50;
-
-  for (const line of cleanText) {
-    const words = line.split(" ");
-    let currentLine = "";
-
-    for (const word of words) {
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      const textWidth = font.widthOfTextAtSize(testLine, 11);
-
-      if (textWidth > width - 100) {
-        if (y < 60) {
-          page = pdfDoc.addPage([595, 842]);
-          y = page.getHeight() - 50;
-        }
-        page.drawText(currentLine, { x: 50, y, size: 11, font });
-        y -= 16;
-        currentLine = word;
-      } else {
-        currentLine = testLine;
-      }
-    }
-
-    if (currentLine) {
-      if (y < 60) {
-        page = pdfDoc.addPage([595, 842]);
-        y = page.getHeight() - 50;
-      }
-      page.drawText(currentLine, { x: 50, y, size: 11, font });
-      y -= 16;
-    }
-  }
-
-  return await pdfDoc.save();
+  await browser.close();
+  return Buffer.from(pdfBuffer);
 }
