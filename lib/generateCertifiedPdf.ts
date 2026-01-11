@@ -15,32 +15,27 @@ export async function generateCertifiedPdf({
   orderId
 }: GeneratePdfInput): Promise<Buffer> {
   
-  // 1. LAUNCH ENGINE
-  // Explicitly setting headless: true to avoid TS errors on the 'chromium' object
+  // FIXED: Fetch the executable path reliably
+  const executablePath = await chromium.executablePath();
+
   const browser = await puppeteer.launch({
     args: chromium.args,
-    executablePath: await chromium.executablePath(),
-    headless: true, 
+    executablePath: executablePath,
+    headless: true, // Standard headless mode for serverless
   });
 
   const page = await browser.newPage();
   
-  // Set A4 dimensions (72 DPI) manually here
+  // Set A4 dimensions (standard 72 DPI)
   await page.setViewport({ width: 794, height: 1123 });
 
-  // 2. DESIGN-PROOF HTML TEMPLATE
   const htmlContent = `
     <!DOCTYPE html>
     <html>
       <head>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
-          body { 
-            font-family: 'Noto Sans', sans-serif; 
-            padding: 0; 
-            margin: 0;
-            color: #18222b; 
-          }
+          body { font-family: 'Noto Sans', sans-serif; padding: 0; margin: 0; color: #18222b; }
           .cert-container { 
             border: 12px double #18222b; 
             margin: 20px;
@@ -50,29 +45,11 @@ export async function generateCertifiedPdf({
             box-sizing: border-box;
             background: #fff;
           }
-          .cert-header { 
-            text-align: center; 
-            border-bottom: 2px solid #18222b; 
-            margin-bottom: 30px; 
-            padding-bottom: 10px; 
-          }
-          .translation-body { 
-            font-size: 13px; 
-            line-height: 1.5; 
-          }
-          /* Support for tables in the editor to mirror the Spanish certificate layout */
+          .cert-header { text-align: center; border-bottom: 2px solid #18222b; margin-bottom: 30px; padding-bottom: 10px; }
+          .translation-body { font-size: 13px; line-height: 1.5; }
           table { width: 100%; border-collapse: collapse; margin-top: 15px; }
           table, th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-          
-          .cert-footer { 
-            position: absolute; 
-            bottom: 40px; 
-            left: 40px; 
-            right: 40px; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: flex-end; 
-          }
+          .cert-footer { position: absolute; bottom: 40px; left: 40px; right: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
         </style>
       </head>
       <body>
@@ -81,16 +58,7 @@ export async function generateCertifiedPdf({
             <h1 style="margin: 0; font-size: 24px; letter-spacing: 1px;">CERTIFICATE OF TRANSLATION ACCURACY</h1>
             <p style="margin: 5px 0 0; font-size: 10px; font-weight: bold;">ORDER ID: ${orderId.slice(-8).toUpperCase()}</p>
           </div>
-
-          <p style="font-size: 12px; margin-bottom: 20px;">
-            This document certifies that the translation of <strong>${originalFilename}</strong> 
-            provided by <strong>${fullName}</strong> has been reviewed and certified by Accucert.
-          </p>
-
-          <div class="translation-body">
-            ${extractedText}
-          </div>
-
+          <div class="translation-body">${extractedText}</div>
           <div class="cert-footer">
             <div>
               <p style="margin-bottom: 40px;">Certified by Authorized Reviewer:</p>
@@ -98,19 +66,15 @@ export async function generateCertifiedPdf({
                 <strong>Accucert Professional Services</strong>
               </p>
             </div>
-            <div style="text-align: right; color: #ccc; font-size: 10px; border: 1px dashed #ccc; padding: 15px;">
-              [ OFFICIAL SEAL ]
-            </div>
+            <div style="text-align: right; color: #ccc; font-size: 10px; border: 1px dashed #ccc; padding: 15px;">[ SEAL ]</div>
           </div>
         </div>
       </body>
     </html>
   `;
 
-  // Use 'networkidle0' to ensure any external layouts or fonts finish loading
   await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 
-  // 3. GENERATE PDF
   const pdfBuffer = await page.pdf({
     format: 'A4',
     printBackground: true,
