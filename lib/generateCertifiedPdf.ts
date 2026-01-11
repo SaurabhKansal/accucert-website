@@ -15,21 +15,20 @@ export async function generateCertifiedPdf({
   orderId
 }: GeneratePdfInput): Promise<Buffer> {
   
-  // FIXED INITIALIZATION: 
-  // Removed 'chromium.headless' and 'chromium.defaultViewport' 
-  // to satisfy current TypeScript definitions.
+  // 1. FIXED LAUNCH LOGIC
+  // Removed 'chromium.defaultViewport' and 'chromium.headless' to fix TS errors.
   const browser = await puppeteer.launch({
     args: chromium.args,
     executablePath: await chromium.executablePath(),
-    headless: true, // Manually set to true for serverless execution
+    headless: true, // Manually set to true for serverless stability
   });
 
   const page = await browser.newPage();
   
-  // Set A4 dimensions for high-fidelity rendering
+  // Set A4 dimensions (72 DPI) manually here instead of in launch options
   await page.setViewport({ width: 794, height: 1123 });
 
-  // Build the "Mirror" HTML Template
+  // 2. BUILD THE "MIRROR" HTML TEMPLATE
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -49,6 +48,7 @@ export async function generateCertifiedPdf({
             min-height: 1040px; 
             position: relative;
             box-sizing: border-box;
+            background: #fff;
           }
           .cert-header { 
             text-align: center; 
@@ -60,7 +60,6 @@ export async function generateCertifiedPdf({
             font-size: 13px; 
             line-height: 1.5; 
           }
-          /* Ensure editor-generated tables look professional */
           table { width: 100%; border-collapse: collapse; margin-top: 15px; }
           table, th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
           
@@ -109,7 +108,7 @@ export async function generateCertifiedPdf({
 
   await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 
-  // Generate High-Quality PDF
+  // 3. GENERATE THE PDF
   const pdfBuffer = await page.pdf({
     format: 'A4',
     printBackground: true,
