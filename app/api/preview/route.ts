@@ -13,15 +13,16 @@ export async function POST(req: Request) {
     );
 
     // 1. Fetch record for metadata (names, original filename)
-    const { data: translation } = await supabase
+    const { data: translation, error: fetchError } = await supabase
       .from("translations")
       .select("*")
       .eq("id", requestId)
       .single();
 
-    if (!translation) throw new Error("Translation not found");
+    if (fetchError || !translation) throw new Error("Translation not found");
 
     // 2. Generate PDF using the current editor HTML (editText)
+    // Note: generateCertifiedPdf returns a Buffer
     const pdfBuffer = await generateCertifiedPdf({
       originalFilename: translation.filename,
       extractedText: editText,
@@ -30,7 +31,8 @@ export async function POST(req: Request) {
     });
 
     // 3. Return the PDF as a downloadable stream
-    return new Response(pdfBuffer, {
+    // FIX: Wrapping pdfBuffer in new Uint8Array() resolves the Type Error during build
+    return new Response(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
@@ -40,6 +42,9 @@ export async function POST(req: Request) {
 
   } catch (err: any) {
     console.error("PREVIEW ERROR:", err.message);
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { 
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 }
