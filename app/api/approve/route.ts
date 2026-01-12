@@ -3,37 +3,27 @@ import { Resend } from "resend";
 import { generateCertifiedPdf } from "@/lib/generateCertifiedPdf";
 
 export const runtime = "nodejs";
+// Force dynamic rendering to ensure environment variables are always fresh
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
     const { requestId, email } = await req.json();
 
-    // 1. GET & VALIDATE VARIABLES
+    // 1. GET & VALIDATE ENV VARS
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     const resendKey = process.env.RESEND_API_KEY?.trim();
 
-    // Audit Log for Debugging
-    console.log("Approval API Audit:", {
-      hasUrl: !!supabaseUrl,
-      hasServiceKey: !!supabaseKey,
-      hasResendKey: !!resendKey,
-      requestId,
-      clientEmail: email
-    });
-
-    if (!supabaseUrl || !supabaseUrl.startsWith("https://")) {
-      return new Response(
-        JSON.stringify({ error: "Invalid Supabase configuration." }), 
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+    if (!supabaseUrl || !supabaseKey || !resendKey) {
+      throw new Error("Missing server configuration (Supabase/Resend Keys).");
     }
 
     // 2. INITIALIZE CLIENTS
-    const supabase = createClient(supabaseUrl, supabaseKey!);
+    const supabase = createClient(supabaseUrl, supabaseKey);
     const resend = new Resend(resendKey);
 
-    // 3. FETCH DATA FROM SUPABASE
+    // 3. FETCH DATA
     const { data: translation, error: fetchError } = await supabase
       .from("translations")
       .select("*")
@@ -41,12 +31,11 @@ export async function POST(req: Request) {
       .single();
 
     if (fetchError || !translation) {
-      console.error("Supabase Fetch Error:", fetchError);
-      throw new Error("Could not find translation request in database.");
+      throw new Error("Translation record not found.");
     }
 
-    // 4. GENERATE THE CERTIFIED PDF (Updated for Request 3)
-    // We now pass fullName and orderId so Page 1 of the PDF is personalized
+    // 4. GENERATE PDF
+    // Ensure generateCertifiedPdf returns a Buffer or Uint8Array
     const pdfBytes = await generateCertifiedPdf({
       originalFilename: translation.filename,
       extractedText: translation.extracted_text,
@@ -54,55 +43,47 @@ export async function POST(req: Request) {
       orderId: translation.id
     });
 
-    // 5. SEND EMAIL WITH ATTACHMENT
-    const { error: emailError } = await resend.emails.send({
-      from: "Accucert Team <onboarding@resend.dev>", 
+    // 5. SEND EMAIL
+    // IMPORTANT: Resend requires the content to be a Buffer or a base64 string.
+    // We use Buffer.from(pdfBytes) to ensure compatibility.
+    const { data: emailData, error: emailError } = await resend.emails.send({
+      from: "Accucert <onboarding@resend.dev>", // Replace with your verified domain later
       to: email,
-      subject: `Approved: Certified Translation for ${translation.filename}`,
+      subject: `Certified Translation: ${translation.filename}`,
       html: `
-        <div style="font-family: sans-serif; color: #18222b; line-height: 1.6; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-          <h2 style="color: #18222b; border-bottom: 2px solid #18222b; padding-bottom: 10px;">Official Translation Ready</h2>
+        <div style="font-family: sans-serif; color: #18222b;">
+          <h2>Your Certified Document is Ready</h2>
           <p>Hello <strong>${translation.full_name}</strong>,</p>
-          <p>Our professional review team has completed the certification of your document: <strong>${translation.filename}</strong>.</p>
-          <p>Please find your official <strong>Certified PDF Package</strong> attached to this email. This package includes:</p>
-          <ul>
-            <li>Certificate of Translation Accuracy</li>
-            <li>Certified Translation Text</li>
-          </ul>
-          <br />
-          <p>Thank you for choosing Accucert.</p>
-          <hr style="border:none; border-top:1px solid #eee;" />
-          <p style="font-size: 11px; color: #999;">Accucert Professional Translation Services | Order ID: ${translation.id.slice(0,8)}</p>
+          <p>Please find your certified translation for <strong>${translation.filename}</strong> attached.</p>
+          <p>Order ID: ${translation.id}</p>
         </div>
       `,
       attachments: [
         {
-          filename: `Certified_Translation_${translation.filename}.pdf`,
-          content: Buffer.from(pdfBytes).toString("base64"), // Convert to Base64 for Resend
+          filename: `Certified_${translation.filename}.pdf`,
+          content: Buffer.from(pdfBytes), 
         },
       ],
     });
 
     if (emailError) {
-      console.error("Resend Sending Error:", emailError);
-      throw new Error("Failed to send translation email.");
+      console.error("Resend Error Details:", emailError);
+      throw new Error(`Email failed: ${emailError.message}`);
     }
 
-    // 6. UPDATE STATUS TO 'APPROVED'
-    const { error: updateError } = await supabase
+    // 6. UPDATE STATUS
+    await supabase
       .from("translations")
       .update({ status: "approved" })
       .eq("id", requestId);
 
-    if (updateError) throw updateError;
-
-    return new Response(JSON.stringify({ success: true }), { 
+    return new Response(JSON.stringify({ success: true, message: "Dispatched successfully" }), { 
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
 
   } catch (err: any) {
-    console.error("APPROVAL ROUTE ERROR:", err.message);
+    console.error("CRITICAL_APPROVE_ERROR:", err.message);
     return new Response(JSON.stringify({ error: err.message }), { 
       status: 500,
       headers: { "Content-Type": "application/json" }
