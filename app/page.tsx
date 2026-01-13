@@ -291,14 +291,21 @@ export default function Home() {
           </div>
         </div>
       </section>
-
       {/* FOOTER */}
       <footer className="bg-slate-900 text-slate-300 border-t border-slate-700 relative z-10">
         <div className="max-w-7xl mx-auto px-6 py-16 grid md:grid-cols-4 gap-8 text-sm text-center md:text-left">
           <div className="col-span-2">
-            <img src="/logo.jpeg" className="h-7 mb-4 mx-auto md:mx-0" />
-            <p className="max-w-sm mx-auto md:mx-0">Official certified translations for worldwide use using secure technology.</p>
+            {/* Added alt attribute to fix the JSX-A11Y error */}
+            <img 
+              src="/logo.jpeg" 
+              alt="Accucert Logo" 
+              className="h-7 mb-4 mx-auto md:mx-0" 
+            />
+            <p className="max-w-sm mx-auto md:mx-0">
+              Official certified translations for worldwide use using secure technology.
+            </p>
           </div>
+          {/* You can add more columns here (Links, Contact, etc.) in the future */}
         </div>
         <div className="text-center text-xs text-slate-500 py-8 border-t border-slate-800">
           © 2026 Accucert. All rights reserved.
