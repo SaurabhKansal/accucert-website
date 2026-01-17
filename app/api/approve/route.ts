@@ -1,92 +1,66 @@
-import { createClient } from "@supabase/supabase-js";
-import { Resend } from "resend";
-import { generateCertifiedPdf } from "@/lib/generateCertifiedPdf";
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js'; // Assuming you use Supabase
+import { generateCertifiedPdf } from '@/lib/generateCertifiedPdf';
+import { Resend } from 'resend';
 
-export const runtime = "nodejs";
-// Force dynamic rendering to ensure environment variables are always fresh
-export const dynamic = "force-dynamic";
+const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const { requestId, email } = await req.json();
+    const { orderId } = await req.json();
 
-    // 1. GET & VALIDATE ENV VARS
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-    const resendKey = process.env.RESEND_API_KEY?.trim();
-
-    if (!supabaseUrl || !supabaseKey || !resendKey) {
-      throw new Error("Missing server configuration (Supabase/Resend Keys).");
-    }
-
-    // 2. INITIALIZE CLIENTS
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    const resend = new Resend(resendKey);
-
-    // 3. FETCH DATA
-    const { data: translation, error: fetchError } = await supabase
-      .from("translations")
-      .select("*")
-      .eq("id", requestId)
+    // 1. Get the original document image URL from Supabase
+    const { data: order, error: fetchError } = await supabase
+      .from('translations')
+      .select('*')
+      .eq('id', orderId)
       .single();
 
-    if (fetchError || !translation) {
-      throw new Error("Translation record not found.");
-    }
+    if (fetchError || !order) throw new Error('Order not found');
 
-    // 4. GENERATE PDF
-    // Ensure generateCertifiedPdf returns a Buffer or Uint8Array
-    const pdfBytes = await generateCertifiedPdf({
-      originalFilename: translation.filename,
-      extractedText: translation.extracted_text,
-      fullName: translation.full_name || "Valued Client",
-      orderId: translation.id
+    // 2. Call Codia AI to get the refined HTML layout
+    const codiaResponse = await fetch('https://api.codia.ai/v1/open/image_to_design', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.CODIA_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ 
+        image_url: order.original_image_url,
+        platform: 'web',
+        framework: 'html' 
+      })
     });
 
-    // 5. SEND EMAIL
-    // IMPORTANT: Resend requires the content to be a Buffer or a base64 string.
-    // We use Buffer.from(pdfBytes) to ensure compatibility.
-    const { data: emailData, error: emailError } = await resend.emails.send({
-      from: "Accucert <onboarding@resend.dev>", // Replace with your verified domain later
-      to: email,
-      subject: `Certified Translation: ${translation.filename}`,
-      html: `
-        <div style="font-family: sans-serif; color: #18222b;">
-          <h2>Your Certified Document is Ready</h2>
-          <p>Hello <strong>${translation.full_name}</strong>,</p>
-          <p>Please find your certified translation for <strong>${translation.filename}</strong> attached.</p>
-          <p>Order ID: ${translation.id}</p>
-        </div>
-      `,
+    if (!codiaResponse.ok) throw new Error('Codia AI processing failed');
+    const { code } = await codiaResponse.json();
+
+    // 3. Generate the Final PDF using the Codia HTML
+    const pdfBuffer = await generateCertifiedPdf({
+      layoutHtml: code.html,
+      fullName: order.full_name,
+      orderId: order.id
+    });
+
+    // 4. Send the Final PDF via Resend
+    await resend.emails.send({
+      from: 'Accucert <translations@accucert.com>',
+      to: order.user_email,
+      subject: 'Your Certified Translation is Ready!',
+      text: 'Please find your certified translation attached.',
       attachments: [
         {
-          filename: `Certified_${translation.filename}.pdf`,
-          content: Buffer.from(pdfBytes), 
+          filename: `Certified_Translation_${orderId}.pdf`,
+          content: pdfBuffer,
         },
       ],
     });
 
-    if (emailError) {
-      console.error("Resend Error Details:", emailError);
-      throw new Error(`Email failed: ${emailError.message}`);
-    }
+    return NextResponse.json({ success: true, message: 'Dispatched successfully' });
 
-    // 6. UPDATE STATUS
-    await supabase
-      .from("translations")
-      .update({ status: "approved" })
-      .eq("id", requestId);
-
-    return new Response(JSON.stringify({ success: true, message: "Dispatched successfully" }), { 
-      status: 200,
-      headers: { "Content-Type": "application/json" }
-    });
-
-  } catch (err: any) {
-    console.error("CRITICAL_APPROVE_ERROR:", err.message);
-    return new Response(JSON.stringify({ error: err.message }), { 
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+  } catch (error: any) {
+    console.error('DISPATCH_ERROR:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

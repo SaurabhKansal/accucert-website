@@ -2,21 +2,17 @@ import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
 type GeneratePdfInput = {
-  originalFilename: string;
-  extractedText: string; 
+  layoutHtml: string; // Changed from extractedText
   fullName: string;
   orderId: string;
 };
 
 export async function generateCertifiedPdf({
-  originalFilename,
-  extractedText,
+  layoutHtml,
   fullName,
   orderId
 }: GeneratePdfInput): Promise<Buffer> {
   
-  // 1. STABILITY LAUNCH
-  // These specific args help bypass missing Linux libraries like libnss3
   const browser = await puppeteer.launch({
     args: [
       ...chromium.args,
@@ -29,43 +25,43 @@ export async function generateCertifiedPdf({
     headless: true,
   });
 
-  const page = await browser.newPage();
-  await page.setViewport({ width: 794, height: 1123 });
+  try {
+    const page = await browser.newPage();
+    // A4 dimensions in pixels at 96 DPI
+    await page.setViewport({ width: 794, height: 1123 });
 
-  // 2. THE UNIVERSAL MIRROR TEMPLATE
-  const htmlContent = `
-    <html>
-      <head>
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
-          body { font-family: 'Noto Sans', sans-serif; padding: 40px; margin: 0; }
-          .document-sheet { 
-            background: white; 
-            border: 12px double #18222b; 
-            padding: 20mm; 
-            min-height: 250mm;
-          }
-          .content-area { font-size: 12pt; line-height: 1.6; }
-          table { width: 100%; border-collapse: collapse; margin: 15px 0; border: 1.5pt solid black; }
-          th, td { border: 1pt solid black; padding: 10px; text-align: left; }
-        </style>
-      </head>
-      <body>
-        <div class="document-sheet">
-          <div class="content-area">${extractedText}</div>
-        </div>
-      </body>
-    </html>
-  `;
+    // Inject the refined layout from Codia AI
+    // We wrap it in a basic shell to ensure the Tailwind/CSS renders correctly
+    const finalHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            @page { margin: 0; }
+            body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
+          </style>
+        </head>
+        <body>
+          ${layoutHtml}
+          <div style="position: absolute; bottom: 50px; right: 50px; font-size: 10px; color: gray;">
+            Certified by Accucert for ${fullName} | Order: ${orderId}
+          </div>
+        </body>
+      </html>
+    `;
 
-  await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+    await page.setContent(finalHtml, { waitUntil: 'networkidle0' });
 
-  const pdfBuffer = await page.pdf({
-    format: 'A4',
-    printBackground: true,
-  });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '0px', bottom: '0px', left: '0px', right: '0px' }
+    });
 
-  await browser.close();
-  // Ensure we return a Buffer
-  return Buffer.from(pdfBuffer);
+    return Buffer.from(pdfBuffer);
+  } finally {
+    await browser.close();
+  }
 }
