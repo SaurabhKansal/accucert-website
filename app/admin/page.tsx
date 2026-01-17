@@ -7,6 +7,7 @@ import 'react-quill-new/dist/quill.snow.css';
 
 const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
+// Using public variables as they are required for the client-side Supabase connection
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -15,11 +16,8 @@ const supabase = createClient(
 export default function AdminDashboard() {
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // FILTERS RESTORED
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  
   const [selectedReq, setSelectedReq] = useState<any>(null);
   const [editText, setEditText] = useState("");
   const [showLivePreview, setShowLivePreview] = useState(false);
@@ -47,7 +45,6 @@ export default function AdminDashboard() {
     setLoading(false);
   }
 
-  // FILTER LOGIC
   const filteredRequests = requests.filter(req => {
     const matchesSearch = (req.full_name?.toLowerCase() || "").includes(search.toLowerCase()) || 
                           (req.user_email?.toLowerCase() || "").includes(search.toLowerCase());
@@ -83,7 +80,7 @@ export default function AdminDashboard() {
   };
 
   async function handleFinalApprove() {
-    console.log("Dispatch Clicked..."); // Debugging check
+    if (!selectedReq) return;
     
     if (selectedReq.payment_status !== 'paid') {
         alert("⚠️ UNPAID: Payment required before dispatch.");
@@ -94,24 +91,33 @@ export default function AdminDashboard() {
     
     setIsProcessing(true);
     try {
-      // Step 1: Save Content
-      const { error: dbError } = await supabase.from("translations").update({ extracted_text: editText }).eq("id", selectedReq.id);
+      // Step 1: Sync the current editor text to the database
+      const { error: dbError } = await supabase
+        .from("translations")
+        .update({ extracted_text: editText })
+        .eq("id", selectedReq.id);
+        
       if (dbError) throw new Error("Database Save Failed: " + dbError.message);
 
-      // Step 2: Call API
+      // Step 2: Call the Dispatch API
+      // FIX: Ensure key is 'orderId' to match the backend expectations
       const res = await fetch("/api/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId: selectedReq.id, email: selectedReq.user_email }),
+        body: JSON.stringify({ 
+            orderId: selectedReq.id, 
+            email: selectedReq.user_email 
+        }),
       });
+
+      const result = await res.json();
 
       if (res.ok) {
         alert("✅ Success: Package Dispatched!");
         setSelectedReq(null);
         fetchRequests();
       } else {
-        const errorData = await res.json().catch(() => ({ error: "Server crashed or returned invalid JSON" }));
-        alert("❌ Dispatch Failed: " + errorData.error);
+        alert("❌ Dispatch Failed: " + (result.error || "Unknown Server Error"));
       }
     } catch (err: any) {
       console.error("Critical Error:", err);
@@ -129,7 +135,6 @@ export default function AdminDashboard() {
         <header className="mb-10 flex flex-col md:flex-row justify-between items-center gap-4">
           <h1 className="text-3xl font-black italic tracking-tighter uppercase">ACCUCERT_ADMIN</h1>
           
-          {/* SEARCH & FILTER UI */}
           <div className="flex gap-3 w-full md:w-auto">
             <input 
               type="text" placeholder="Search orders..." 
@@ -180,7 +185,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* MODAL */}
       {selectedReq && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-[98vw] h-[95vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden">
