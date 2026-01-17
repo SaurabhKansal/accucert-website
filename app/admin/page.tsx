@@ -7,7 +7,6 @@ import 'react-quill-new/dist/quill.snow.css';
 
 const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
-// Using public variables as they are required for the client-side Supabase connection
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -79,6 +78,12 @@ export default function AdminDashboard() {
     setEditText(req.extracted_text || "");
   };
 
+  /**
+   * NEW WORKFLOW:
+   * 1. Fetches Refined HTML from Codia via the API route.
+   * 2. Opens a new tab and triggers window.print().
+   * 3. This avoids all Puppeteer/Chromium crashes on Vercel.
+   */
   async function handleFinalApprove() {
     if (!selectedReq) return;
     
@@ -87,11 +92,11 @@ export default function AdminDashboard() {
         return;
     }
     
-    if(!confirm("Finalize and dispatch certified PDF?")) return;
+    if(!confirm("Fetch Refined Design and Print to PDF?")) return;
     
     setIsProcessing(true);
     try {
-      // Step 1: Sync the current editor text to the database
+      // Step 1: Sync editor text to DB
       const { error: dbError } = await supabase
         .from("translations")
         .update({ extracted_text: editText })
@@ -99,25 +104,34 @@ export default function AdminDashboard() {
         
       if (dbError) throw new Error("Database Save Failed: " + dbError.message);
 
-      // Step 2: Call the Dispatch API
-      // FIX: Ensure key is 'orderId' to match the backend expectations
+      // Step 2: Call API to get Codia Refined HTML
       const res = await fetch("/api/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-            orderId: selectedReq.id, 
-            email: selectedReq.user_email 
-        }),
+        body: JSON.stringify({ orderId: selectedReq.id }),
       });
 
       const result = await res.json();
 
-      if (res.ok) {
-        alert("✅ Success: Package Dispatched!");
+      if (res.ok && result.refinedHtml) {
+        // Step 3: Trigger Browser Print
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(result.refinedHtml);
+          printWindow.document.close();
+          
+          // Wait slightly for fonts/styles to load then print
+          printWindow.onload = () => {
+            printWindow.print();
+          };
+        } else {
+          alert("Popup blocked! Please allow popups to generate the PDF.");
+        }
+        
         setSelectedReq(null);
         fetchRequests();
       } else {
-        alert("❌ Dispatch Failed: " + (result.error || "Unknown Server Error"));
+        alert("❌ Refinement Failed: " + (result.error || "Unknown Error"));
       }
     } catch (err: any) {
       console.error("Critical Error:", err);
@@ -221,7 +235,7 @@ export default function AdminDashboard() {
                   disabled={isProcessing || selectedReq.payment_status !== 'paid'} 
                   className="bg-black text-white px-12 py-4 rounded-2xl font-black text-[11px] hover:shadow-2xl transition disabled:opacity-20"
                 >
-                  {isProcessing ? "DISPATCHING..." : "CERTIFY & DISPATCH"}
+                  {isProcessing ? "REFining..." : "CERTIFY & PRINT PDF"}
                 </button>
             </div>
           </div>
