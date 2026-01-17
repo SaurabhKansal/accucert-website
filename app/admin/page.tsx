@@ -152,9 +152,12 @@ export default function AdminDashboard() {
           printWindow.document.write(finalHtml);
           printWindow.document.close();
           
-          printWindow.onload = () => {
-            printWindow.print();
-          };
+          printWindow.document.close();
+setTimeout(() => {
+  printWindow.focus();
+  printWindow.print();
+  // Optional: printWindow.close(); 
+}, 500);
         } else {
           alert("Popup blocked! Please allow popups to generate the PDF.");
         }
