@@ -2,84 +2,75 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { Resend } from 'resend';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const orderId = body.orderId || body.requestId;
+    const { orderId } = await req.json();
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
-    if (!orderId) throw new Error('Order ID is missing');
+    // 1. Fetch Order
+    const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
+    if (!order) throw new Error('Order not found');
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!, 
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // 2. Create PDF with pdf-lib (No Chromium needed!)
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([600, 800]); // Standard A4-ish size
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    // 1. Fetch the order details
-    const { data: order, error: fetchError } = await supabase
-      .from('translations')
-      .select('*')
-      .eq('id', orderId)
-      .single();
+    // Draw Header
+    page.drawText('CERTIFIED TRANSLATION', { x: 50, y: 750, size: 20, font: boldFont });
+    page.drawText(`Order ID: ${orderId}`, { x: 50, y: 730, size: 10, font, color: rgb(0.5, 0.5, 0.5) });
 
-    if (fetchError || !order) throw new Error('Order not found in Database');
-
-    // 2. Identify the Image URL (handles potential column name mismatches)
-    const imageUrl = order.original_image_url || order.image_url;
-    
-    let refinedHtml = "";
-
-    // 3. Attempt Codia AI Refinement if a URL exists
-    if (imageUrl) {
-      try {
-        const codiaRes = await fetch('https://api.codia.ai/v1/open/image_to_design', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.CODIA_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ 
-            image_url: imageUrl, 
-            platform: 'web', 
-            framework: 'html' 
-          })
-        });
-
-        if (codiaRes.ok) {
-          const codiaData = await codiaRes.json();
-          // Extract HTML from various possible nested structures
-          refinedHtml = codiaData.data?.html || codiaData.code?.html || codiaData.html || (codiaData.data?.code?.html);
-        } else {
-          console.warn(`Codia AI skipped (Status: ${codiaRes.status}). Credits likely exhausted.`);
-        }
-      } catch (e) {
-        console.error("Codia Connection Error:", e);
-      }
-    }
-
-    // 4. FALLBACK: Use Editor Text if Codia fails or is out of credits
-    if (!refinedHtml) {
-      refinedHtml = `
-        <div style="padding: 50mm; font-family: 'Helvetica', 'Arial', sans-serif; color: #1e293b; background: white;">
-          <h1 style="text-align: center; text-transform: uppercase; border-bottom: 2pt solid black; padding-bottom: 10px; margin-bottom: 30px;">
-            Certified Translation
-          </h1>
-          <div style="font-size: 12pt; line-height: 1.8; white-space: pre-wrap;">
-            ${order.extracted_text || "No text content available."}
-          </div>
-        </div>
-      `;
-    }
-
-    // 5. Return success with the HTML to be printed by the browser
-    return NextResponse.json({ 
-      success: true, 
-      refinedHtml,
-      source: refinedHtml.includes('Certified Translation') ? 'fallback' : 'codia'
+    // Draw Content (The text you edited in Admin)
+    const text = order.extracted_text || "No content provided.";
+    page.drawText(text, {
+      x: 50,
+      y: 700,
+      size: 12,
+      font,
+      maxWidth: 500,
+      lineHeight: 15,
     });
 
+    // Draw Footer
+    page.drawText(`Certified by Accucert for ${order.full_name}`, {
+      x: 50,
+      y: 50,
+      size: 10,
+      font: boldFont,
+      color: rgb(0, 0, 0),
+    });
+
+    const pdfBytes = await pdfDoc.save();
+
+    // 3. Send Email via Resend
+    const { data, error } = await resend.emails.send({
+      from: 'Accucert <translations@accucert.com>',
+      to: order.user_email,
+      subject: 'Your Certified Translation is Ready!',
+      text: 'Please find your certified translation attached.',
+      attachments: [
+        {
+          filename: `Certified_Translation_${orderId}.pdf`,
+          content: Buffer.from(pdfBytes),
+        },
+      ],
+    });
+
+    if (error) throw error;
+
+    // 4. Update Status
+    await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
+
+    return NextResponse.json({ success: true });
+
   } catch (error: any) {
-    console.error('API_APPROVE_CRITICAL_ERROR:', error.message);
+    console.error('API Error:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

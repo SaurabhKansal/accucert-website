@@ -51,38 +51,6 @@ export default function AdminDashboard() {
     return matchesSearch && matchesStatus;
   });
 
-  /**
-   * Helper to wrap HTML in an A4 Printable shell with footer
-   */
-  const getFinalPrintableHtml = (layoutHtml: string, fullName: string, orderId: string) => {
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Certified_Translation_${orderId}</title>
-          <script src="https://cdn.tailwindcss.com"></script>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
-            @page { size: A4; margin: 0; }
-            body { margin: 0; padding: 0; font-family: 'Noto Sans', sans-serif; -webkit-print-color-adjust: exact; }
-            .print-container { width: 210mm; min-height: 297mm; position: relative; margin: 0 auto; background: white; }
-            .certification-footer { position: absolute; bottom: 20mm; right: 20mm; font-size: 10px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 5px; text-align: right; }
-          </style>
-        </head>
-        <body>
-          <div class="print-container">
-            ${layoutHtml}
-            <div class="certification-footer">
-              Official Certified Translation<br/>
-              Issued to: ${fullName} | Order Reference: ${orderId}
-            </div>
-          </div>
-        </body>
-      </html>
-    `;
-  };
-
   const getPreviewHtml = (content: string) => {
     return `
       <html>
@@ -110,6 +78,12 @@ export default function AdminDashboard() {
     setEditText(req.extracted_text || "");
   };
 
+  /**
+   * AUTOMATED WORKFLOW:
+   * 1. Saves your edits to Supabase.
+   * 2. Triggers the API to generate a PDF (using pdf-lib) and email it via Resend.
+   * 3. No browser print dialog required.
+   */
   async function handleFinalApprove() {
     if (!selectedReq) return;
     
@@ -118,7 +92,7 @@ export default function AdminDashboard() {
         return;
     }
     
-    if(!confirm("Fetch Refined Design and Print to PDF?")) return;
+    if(!confirm("Finalize, Generate PDF, and Email to Client?")) return;
     
     setIsProcessing(true);
     try {
@@ -130,7 +104,7 @@ export default function AdminDashboard() {
         
       if (dbError) throw new Error("Database Save Failed: " + dbError.message);
 
-      // Step 2: Call API to get Codia Refined HTML
+      // Step 2: Call API to generate PDF and Email
       const res = await fetch("/api/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -139,33 +113,12 @@ export default function AdminDashboard() {
 
       const result = await res.json();
 
-      if (res.ok && result.refinedHtml) {
-        // Step 3: Trigger Browser Print with professional wrapper
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          const finalHtml = getFinalPrintableHtml(
-            result.refinedHtml, 
-            selectedReq.full_name, 
-            selectedReq.id
-          );
-          
-          printWindow.document.write(finalHtml);
-          printWindow.document.close();
-          
-          printWindow.document.close();
-setTimeout(() => {
-  printWindow.focus();
-  printWindow.print();
-  // Optional: printWindow.close(); 
-}, 500);
-        } else {
-          alert("Popup blocked! Please allow popups to generate the PDF.");
-        }
-        
+      if (res.ok) {
+        alert("✅ Success: PDF Generated and Emailed!");
         setSelectedReq(null);
         fetchRequests();
       } else {
-        alert("❌ Refinement Failed: " + (result.error || "Unknown Error"));
+        alert("❌ Dispatch Failed: " + (result.error || "Unknown Error"));
       }
     } catch (err: any) {
       console.error("Critical Error:", err);
@@ -269,7 +222,7 @@ setTimeout(() => {
                   disabled={isProcessing || selectedReq.payment_status !== 'paid'} 
                   className="bg-black text-white px-12 py-4 rounded-2xl font-black text-[11px] hover:shadow-2xl transition disabled:opacity-20"
                 >
-                  {isProcessing ? "REFining..." : "CERTIFY & PRINT PDF"}
+                  {isProcessing ? "DISPATCHING..." : "CERTIFY & DISPATCH"}
                 </button>
             </div>
           </div>
