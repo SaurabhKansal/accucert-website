@@ -9,20 +9,27 @@ export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
 
-    // 1. Initialize Clients inside the POST function to avoid build-time errors
-    const supabaseUrl = process.env.SUPABASE_URL;
+    // 1. Map to your EXACT Vercel Environment Variable names
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL; // Matched to your screenshot
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const resendKey = process.env.RESEND_API_KEY;
     const codiaKey = process.env.CODIA_API_KEY;
 
+    // Safety check to prevent silent failures
     if (!supabaseUrl || !supabaseKey || !resendKey || !codiaKey) {
-      throw new Error('Missing environment variables. Check Vercel Dashboard Settings.');
+      const missing = [];
+      if (!supabaseUrl) missing.push('NEXT_PUBLIC_SUPABASE_URL');
+      if (!supabaseKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+      if (!resendKey) missing.push('RESEND_API_KEY');
+      if (!codiaKey) missing.push('CODIA_API_KEY');
+      
+      throw new Error(`Missing keys in Vercel: ${missing.join(', ')}`);
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
     const resend = new Resend(resendKey);
 
-    // 2. Get the original document data from Supabase
+    // 2. Fetch order data
     const { data: order, error: fetchError } = await supabase
       .from('translations')
       .select('*')
@@ -30,10 +37,10 @@ export async function POST(req: Request) {
       .single();
 
     if (fetchError || !order) {
-      throw new Error(`Order not found or database error: ${fetchError?.message}`);
+      throw new Error(`Order not found: ${fetchError?.message}`);
     }
 
-    // 3. Call Codia AI to get the refined HTML layout
+    // 3. Call Codia AI for high-fidelity HTML reconstruction
     const codiaResponse = await fetch('https://api.codia.ai/v1/open/image_to_design', {
       method: 'POST',
       headers: {
@@ -41,7 +48,7 @@ export async function POST(req: Request) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ 
-        image_url: order.original_image_url, // Ensure this URL is publicly accessible to Codia
+        image_url: order.original_image_url,
         platform: 'web',
         framework: 'html' 
       })
@@ -49,28 +56,29 @@ export async function POST(req: Request) {
 
     if (!codiaResponse.ok) {
       const errorText = await codiaResponse.text();
-      throw new Error(`Codia AI failed: ${errorText}`);
+      throw new Error(`Codia AI Error: ${errorText}`);
     }
     
     const codiaData = await codiaResponse.json();
-    // Use 'code.html' or 'data.html' based on Codia's specific response structure
-    const layoutHtml = codiaData.code?.html || codiaData.html;
+    
+    // Codia returns code in a nested 'data' or 'code' object depending on the endpoint
+    const layoutHtml = codiaData.data?.html || codiaData.code?.html || codiaData.html;
 
-    if (!layoutHtml) throw new Error('Codia AI did not return valid HTML');
+    if (!layoutHtml) throw new Error('Codia AI response missing HTML content');
 
-    // 4. Generate the Final PDF using the Codia HTML
+    // 4. Convert the refined HTML into a Certified PDF
     const pdfBuffer = await generateCertifiedPdf({
       layoutHtml: layoutHtml,
       fullName: order.full_name,
       orderId: order.id
     });
 
-    // 5. Send the Final PDF via Resend
+    // 5. Dispatch via Resend
     const { error: mailError } = await resend.emails.send({
       from: 'Accucert <translations@accucert.com>',
       to: order.user_email,
-      subject: 'Your Certified Translation is Ready!',
-      text: `Hello ${order.full_name}, please find your certified translation attached for Order #${orderId}.`,
+      subject: `Certified Translation Ready - Order #${orderId}`,
+      text: `Hello ${order.full_name}, your certified document is attached.`,
       attachments: [
         {
           filename: `Certified_Translation_${orderId}.pdf`,
@@ -79,18 +87,12 @@ export async function POST(req: Request) {
       ],
     });
 
-    if (mailError) throw new Error(`Email failed to send: ${mailError.message}`);
+    if (mailError) throw new Error(`Email dispatch failed: ${mailError.message}`);
 
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Document refined and dispatched successfully' 
-    });
+    return NextResponse.json({ success: true, message: 'Dispatched successfully!' });
 
   } catch (error: any) {
-    console.error('DISPATCH_CRITICAL_ERROR:', error);
-    return NextResponse.json(
-      { error: error.message || 'Internal Server Error' }, 
-      { status: 500 }
-    );
+    console.error('CRITICAL_DISPATCH_ERROR:', error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
