@@ -51,6 +51,38 @@ export default function AdminDashboard() {
     return matchesSearch && matchesStatus;
   });
 
+  /**
+   * Helper to wrap HTML in an A4 Printable shell with footer
+   */
+  const getFinalPrintableHtml = (layoutHtml: string, fullName: string, orderId: string) => {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Certified_Translation_${orderId}</title>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
+            @page { size: A4; margin: 0; }
+            body { margin: 0; padding: 0; font-family: 'Noto Sans', sans-serif; -webkit-print-color-adjust: exact; }
+            .print-container { width: 210mm; min-height: 297mm; position: relative; margin: 0 auto; background: white; }
+            .certification-footer { position: absolute; bottom: 20mm; right: 20mm; font-size: 10px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 5px; text-align: right; }
+          </style>
+        </head>
+        <body>
+          <div class="print-container">
+            ${layoutHtml}
+            <div class="certification-footer">
+              Official Certified Translation<br/>
+              Issued to: ${fullName} | Order Reference: ${orderId}
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   const getPreviewHtml = (content: string) => {
     return `
       <html>
@@ -78,12 +110,6 @@ export default function AdminDashboard() {
     setEditText(req.extracted_text || "");
   };
 
-  /**
-   * NEW WORKFLOW:
-   * 1. Fetches Refined HTML from Codia via the API route.
-   * 2. Opens a new tab and triggers window.print().
-   * 3. This avoids all Puppeteer/Chromium crashes on Vercel.
-   */
   async function handleFinalApprove() {
     if (!selectedReq) return;
     
@@ -114,13 +140,18 @@ export default function AdminDashboard() {
       const result = await res.json();
 
       if (res.ok && result.refinedHtml) {
-        // Step 3: Trigger Browser Print
+        // Step 3: Trigger Browser Print with professional wrapper
         const printWindow = window.open('', '_blank');
         if (printWindow) {
-          printWindow.document.write(result.refinedHtml);
+          const finalHtml = getFinalPrintableHtml(
+            result.refinedHtml, 
+            selectedReq.full_name, 
+            selectedReq.id
+          );
+          
+          printWindow.document.write(finalHtml);
           printWindow.document.close();
           
-          // Wait slightly for fonts/styles to load then print
           printWindow.onload = () => {
             printWindow.print();
           };
