@@ -22,7 +22,14 @@ export async function POST(req: Request) {
       .single();
 
     if (fetchError || !order) throw new Error('Order not found in Database');
-    if (!order.original_image_url) throw new Error('No image URL found for this order');
+
+    // CHECK BOTH POSSIBLE COLUMN NAMES
+    const imageUrl = order.original_image_url || order.image_url;
+
+    if (!imageUrl) {
+      console.error('Order Data Debug:', order); // Log full row to Vercel
+      throw new Error(`No image URL found. Checked columns: original_image_url, image_url. Found: ${JSON.stringify(Object.keys(order))}`);
+    }
 
     // Call Codia AI
     const codiaRes = await fetch('https://api.codia.ai/v1/open/image_to_design', {
@@ -32,7 +39,7 @@ export async function POST(req: Request) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ 
-        image_url: order.original_image_url, 
+        image_url: imageUrl, 
         platform: 'web', 
         framework: 'html' 
       })
@@ -40,18 +47,13 @@ export async function POST(req: Request) {
 
     if (!codiaRes.ok) {
       const errorDetail = await codiaRes.text();
-      throw new Error(`Codia API returned status ${codiaRes.status}: ${errorDetail}`);
+      throw new Error(`Codia API Error (${codiaRes.status}): ${errorDetail}`);
     }
 
     const codiaData = await codiaRes.json();
-    
-    // MODIFIED: Robust path checking for Codia's response structure
     const refinedHtml = codiaData.data?.html || codiaData.code?.html || codiaData.html || codiaData.data?.code?.html;
 
-    if (!refinedHtml) {
-      console.error('Codia Raw Response:', JSON.stringify(codiaData));
-      throw new Error('Codia AI processed the image but did not return HTML code. Check server logs.');
-    }
+    if (!refinedHtml) throw new Error('Codia AI did not return HTML code');
 
     return NextResponse.json({ success: true, refinedHtml });
 
