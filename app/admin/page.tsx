@@ -51,15 +51,43 @@ export default function AdminDashboard() {
     return matchesSearch && matchesStatus;
   });
 
+  /**
+   * Refined Visual Preview logic
+   * Fixed: Added word-wrap and pre-wrap to match real document behavior.
+   */
   const getPreviewHtml = (content: string) => {
     return `
       <html>
         <head>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
-            body { font-family: 'Noto Sans', sans-serif; margin: 0; padding: 20px; background: #f1f5f9; display: flex; justify-content: center; }
-            .document-sheet { background: white; width: 210mm; min-height: 297mm; padding: 25mm; box-shadow: 0 10px 40px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; box-sizing: border-box; color: #1e293b; }
-            .content-area { font-size: 12pt; line-height: 1.6; }
+            body { 
+              font-family: 'Noto Sans', sans-serif; 
+              margin: 0; 
+              padding: 20px; 
+              background: #f1f5f9; 
+              display: flex; 
+              justify-content: center; 
+            }
+            .document-sheet { 
+              background: white; 
+              width: 210mm; 
+              min-height: 297mm; 
+              padding: 25mm; 
+              box-shadow: 0 10px 40px rgba(0,0,0,0.1); 
+              border: 1px solid #e2e8f0; 
+              box-sizing: border-box; 
+              color: #1e293b;
+              word-wrap: break-word;
+              overflow-wrap: break-word;
+            }
+            .content-area { 
+              font-size: 12pt; 
+              line-height: 1.6; 
+              white-space: pre-wrap; 
+            }
+            strong, b { font-weight: bold; }
+            p { margin-bottom: 1em; }
             table { width: 100%; border-collapse: collapse; margin: 15px 0; border: 1.5pt solid black; }
             th, td { border: 1pt solid black; padding: 10px; text-align: left; vertical-align: top; }
             h1, h2, h3 { text-align: center; text-transform: uppercase; }
@@ -79,10 +107,9 @@ export default function AdminDashboard() {
   };
 
   /**
-   * AUTOMATED WORKFLOW:
-   * 1. Saves your edits to Supabase.
-   * 2. Triggers the API to generate a PDF (using pdf-lib) and email it via Resend.
-   * 3. No browser print dialog required.
+   * AUTOMATED DISPATCH WORKFLOW
+   * 1. Syncs current editor text to Database.
+   * 2. Calls /api/approve to generate the official PDF and Email it.
    */
   async function handleFinalApprove() {
     if (!selectedReq) return;
