@@ -21,9 +21,10 @@ export async function POST(req: Request) {
       .eq('id', orderId)
       .single();
 
-    if (fetchError || !order) throw new Error('Order not found');
+    if (fetchError || !order) throw new Error('Order not found in Database');
+    if (!order.original_image_url) throw new Error('No image URL found for this order');
 
-    // Call Codia AI for high-fidelity design
+    // Call Codia AI
     const codiaRes = await fetch('https://api.codia.ai/v1/open/image_to_design', {
       method: 'POST',
       headers: {
@@ -37,15 +38,25 @@ export async function POST(req: Request) {
       })
     });
 
+    if (!codiaRes.ok) {
+      const errorDetail = await codiaRes.text();
+      throw new Error(`Codia API returned status ${codiaRes.status}: ${errorDetail}`);
+    }
+
     const codiaData = await codiaRes.json();
-    const refinedHtml = codiaData.data?.html || codiaData.code?.html || codiaData.html;
+    
+    // MODIFIED: Robust path checking for Codia's response structure
+    const refinedHtml = codiaData.data?.html || codiaData.code?.html || codiaData.html || codiaData.data?.code?.html;
 
-    if (!refinedHtml) throw new Error('Codia AI failed to return HTML');
+    if (!refinedHtml) {
+      console.error('Codia Raw Response:', JSON.stringify(codiaData));
+      throw new Error('Codia AI processed the image but did not return HTML code. Check server logs.');
+    }
 
-    // Return HTML to frontend for browser-based printing
     return NextResponse.json({ success: true, refinedHtml });
 
   } catch (error: any) {
+    console.error('API_APPROVE_ERROR:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
