@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import dynamic from "next/dynamic";
 import 'react-quill-new/dist/quill.snow.css';
 
+// Dynamically import Quill to prevent SSR issues in Next.js
 const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
 const supabase = createClient(
@@ -22,6 +23,7 @@ export default function AdminDashboard() {
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Quill Toolbar Configuration
   const modules = useMemo(() => ({
     toolbar: [
       [{ 'header': [1, 2, 3, false] }],
@@ -29,7 +31,6 @@ export default function AdminDashboard() {
       [{ 'color': [] }, { 'background': [] }],
       [{ 'align': [] }],
       [{ 'list': 'ordered' }, { 'list': 'bullet' }],
-      ['table'], 
       ['clean']
     ],
   }), []);
@@ -51,28 +52,35 @@ export default function AdminDashboard() {
     return matchesSearch && matchesStatus;
   });
 
+  // Replicates the "Gold Border" design shell for the Admin Preview
   const getPreviewHtml = (content: string) => {
     return `
       <html>
         <head>
           <style>
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
-            body { font-family: 'Noto Sans', sans-serif; margin: 0; padding: 20px; background: #f1f5f9; display: flex; justify-content: center; }
-            .document-sheet { 
-              background: white; width: 210mm; min-height: 297mm; padding: 25mm; 
-              box-shadow: 0 10px 40px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; 
-              box-sizing: border-box; color: #1e293b; word-wrap: break-word; overflow-wrap: break-word;
+            body { font-family: 'Times New Roman', serif; margin: 0; padding: 20px; background: #e2e8f0; display: flex; justify-content: center; }
+            .cert-body { 
+              background: #fdfaf5; width: 210mm; height: 297mm; padding: 30px; 
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2); box-sizing: border-box;
+              display: flex; justify-content: center; align-items: center;
             }
-            .content-area { font-size: 12pt; line-height: 1.6; white-space: pre-wrap; }
-            strong, b { font-weight: bold; }
-            p { margin-bottom: 1em; }
-            table { width: 100%; border-collapse: collapse; margin: 15px 0; border: 1.5pt solid black; }
-            th, td { border: 1pt solid black; padding: 10px; text-align: left; vertical-align: top; }
-            h1, h2, h3 { text-align: center; text-transform: uppercase; }
+            .gold-border {
+              width: 100%; height: 100%; border: 12px double #8b6b32; outline: 2px solid #8b6b32; outline-offset: -20px;
+              padding: 40px; box-sizing: border-box; text-align: center; color: #4a3721; position: relative;
+            }
+            .content-area { margin-top: 20px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+            .header-text { font-size: 24px; font-weight: bold; text-transform: uppercase; color: #8b6b32; }
           </style>
         </head>
         <body>
-          <div class="document-sheet"><div class="content-area">${content}</div></div>
+          <div class="cert-body">
+            <div class="gold-border">
+              <div style="font-size: 16px; letter-spacing: 2px;">ACCUCERT GLOBAL</div>
+              <div class="header-text">${(selectedReq?.document_type || 'Translation').toUpperCase()}</div>
+              <hr style="border: 0.5px solid #d4c4a8; margin: 20px 0;"/>
+              <div class="content-area">${content.replace(/<[^>]*>/g, ' ')}</div>
+            </div>
+          </div>
         </body>
       </html>
     `;
@@ -87,100 +95,98 @@ export default function AdminDashboard() {
   async function handleFinalApprove() {
     if (!selectedReq) return;
     if (selectedReq.payment_status !== 'paid') {
-        alert("⚠️ UNPAID: Payment required before dispatch.");
+        alert("⚠️ UNPAID: Please verify payment before certifying.");
         return;
     }
-    if(!confirm("Finalize, Generate PDF, and Email to Client?")) return;
     
     setIsProcessing(true);
     try {
+      // 1. Save the Human-Edited text back to Supabase
       const { error: dbError } = await supabase
         .from("translations")
         .update({ extracted_text: editText })
         .eq("id", selectedReq.id);
         
-      if (dbError) throw new Error("Database Save Failed: " + dbError.message);
+      if (dbError) throw new Error("Save Failed: " + dbError.message);
 
+      // 2. Trigger the PDF Generation & Email API
       const res = await fetch("/api/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: selectedReq.id }),
       });
 
-      const result = await res.json();
-
       if (res.ok) {
-        alert("✅ Success: PDF Generated and Emailed!");
+        alert("✅ SUCCESS: Translation Certified & PDF Emailed!");
         setSelectedReq(null);
         fetchRequests();
       } else {
-        alert("❌ Dispatch Failed: " + (result.error || "Unknown Error"));
+        const result = await res.json();
+        alert("❌ DISPATCH ERROR: " + (result.error || "Check Vercel Logs"));
       }
     } catch (err: any) {
-      console.error("Critical Error:", err);
-      alert("⚠️ Error: " + err.message);
+      alert("⚠️ CRITICAL ERROR: " + err.message);
     } finally {
       setIsProcessing(false);
     }
   }
 
-  if (loading) return <div className="p-20 text-center font-bold">LOADING_BACKOFFICE...</div>;
+  if (loading) return <div className="p-20 text-center font-bold animate-pulse">LOADING_ACCUCERT_SECURE_VAULT...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8 text-slate-900">
+    <div className="min-h-screen bg-slate-100 p-8 text-slate-900 font-sans">
       <div className="max-w-7xl mx-auto">
-        <header className="mb-10 flex flex-col md:flex-row justify-between items-center gap-4">
-          <h1 className="text-3xl font-black italic tracking-tighter uppercase">ACCUCERT_ADMIN</h1>
+        <header className="mb-8 flex flex-col md:flex-row justify-between items-end gap-4">
+          <div>
+            <h1 className="text-4xl font-black tracking-tighter italic uppercase text-slate-900">Vault_Control</h1>
+            <p className="text-[10px] font-bold text-slate-400 tracking-[0.2em] uppercase">Accucert Global Management System</p>
+          </div>
           
-          <div className="flex gap-3 w-full md:w-auto">
+          <div className="flex gap-4 w-full md:w-auto">
             <input 
-              type="text" placeholder="Search orders..." 
-              className="p-3 border rounded-xl text-sm w-full md:w-64 bg-white outline-none focus:ring-2 ring-black"
+              type="text" placeholder="Search by name or email..." 
+              className="p-4 border-none shadow-sm rounded-2xl text-xs w-full md:w-80 bg-white focus:ring-2 ring-blue-500 transition-all outline-none"
               onChange={(e) => setSearch(e.target.value)}
             />
-            <select className="p-3 border rounded-xl text-sm bg-white" onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="all">All Orders</option>
+            <select className="p-4 border-none shadow-sm rounded-2xl text-xs bg-white font-bold" onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">Status: All</option>
               <option value="pending">Pending</option>
-              <option value="approved">Completed</option>
+              <option value="completed">Completed</option>
             </select>
           </div>
         </header>
 
-        {/* MAIN ORDERS TABLE */}
-        <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-[3rem] shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden">
           <table className="w-full text-left">
-            <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b">
+            <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b tracking-widest">
               <tr>
-                <th className="p-6">Client & Languages</th>
-                <th className="p-6">Doc Type</th>
-                <th className="p-6">Requirements</th>
-                <th className="p-6 text-right">Action</th>
+                <th className="p-8">Order & Language</th>
+                <th className="p-8">Type</th>
+                <th className="p-8">Service Status</th>
+                <th className="p-8 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredRequests.map((req) => (
-                <tr key={req.id} className="hover:bg-slate-50 transition">
-                  <td className="p-6">
-                    <div className="font-bold">{req.full_name}</div>
-                    <div className="text-[10px] text-[var(--accent)] font-bold uppercase tracking-tighter">
-                      {req.language_from || 'Unknown'} → {req.language_to || 'Unknown'}
+                <tr key={req.id} className="hover:bg-slate-50 transition group">
+                  <td className="p-8">
+                    <div className="font-black text-sm">{req.full_name}</div>
+                    <div className="text-[10px] text-blue-600 font-bold uppercase mt-1">
+                      {req.language_from} <span className="text-slate-300 mx-1">→</span> {req.language_to}
                     </div>
                   </td>
-                  <td className="p-6">
-                    <div className="text-xs font-medium text-slate-600">{req.document_type || 'General'}</div>
-                  </td>
-                  <td className="p-6">
+                  <td className="p-8 text-xs font-bold text-slate-500">{req.document_type}</td>
+                  <td className="p-8">
                     <div className="flex gap-2">
-                        {req.needs_apostille && <span className="bg-purple-100 text-purple-700 text-[8px] font-black px-2 py-0.5 rounded">APOSTILLE</span>}
-                        {req.needs_physical_copy && <span className="bg-blue-100 text-blue-700 text-[8px] font-black px-2 py-0.5 rounded">PHYSICAL</span>}
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-black ${req.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-red-50 text-red-500'}`}>
+                        <span className={`px-3 py-1 rounded-full text-[9px] font-black ${req.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                             {req.payment_status === 'paid' ? 'PAID' : 'UNPAID'}
                         </span>
+                        {req.status === 'completed' && <span className="bg-blue-100 text-blue-700 text-[9px] font-black px-3 py-1 rounded-full">SENT</span>}
                     </div>
                   </td>
-                  <td className="p-6 text-right">
-                    <button onClick={() => openReview(req)} className="bg-black text-white px-6 py-2 rounded-xl text-[10px] font-black tracking-widest hover:bg-slate-800 transition">
-                      REVIEW
+                  <td className="p-8 text-right">
+                    <button onClick={() => openReview(req)} className="bg-slate-900 text-white px-8 py-3 rounded-2xl text-[10px] font-black tracking-widest hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all shadow-lg shadow-slate-200">
+                      EDIT & DISPATCH
                     </button>
                   </td>
                 </tr>
@@ -190,80 +196,73 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* MODAL REVIEW SYSTEM */}
+      {/*  */}
       {selectedReq && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-[98vw] h-[95vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-[96vw] h-[92vh] rounded-[4rem] shadow-2xl flex flex-col overflow-hidden border border-white/20">
             
-            {/* Modal Header with New Context Fields */}
-            <div className="px-8 py-4 border-b flex justify-between items-center bg-slate-50">
+            <div className="px-10 py-6 border-b flex justify-between items-center bg-slate-50/50">
               <div>
-                <h2 className="text-xl font-black uppercase italic tracking-tighter">ORDER: {selectedReq.id.slice(0,8)}</h2>
-                <div className="flex gap-4 text-[10px] font-bold text-slate-400 mt-1 uppercase">
-                    <span>From: {selectedReq.language_from}</span>
-                    <span>To: {selectedReq.language_to}</span>
-                    <span className="text-[var(--accent)]">Type: {selectedReq.document_type}</span>
-                </div>
+                <h2 className="text-2xl font-black italic uppercase tracking-tight">Certification_Review</h2>
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Order ID: {selectedReq.id}</p>
               </div>
-              <button onClick={() => setSelectedReq(null)} className="text-xl bg-white w-10 h-10 rounded-full shadow-sm flex items-center justify-center hover:bg-red-50 transition">✕</button>
+              <button onClick={() => setSelectedReq(null)} className="bg-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center hover:bg-red-500 hover:text-white transition-all transform hover:rotate-90">✕</button>
             </div>
 
             <div className="flex-1 overflow-hidden grid md:grid-cols-2">
-              <div className="bg-slate-900 p-8 overflow-auto flex flex-col items-center">
-                <img src={selectedReq.image_url} alt="Source" className="max-w-full shadow-2xl border-[12px] border-white/5" />
-                
-                {/* Client Comments Sidebar */}
-                {selectedReq.client_comments && (
-                  <div className="mt-8 bg-white/10 p-6 rounded-2xl border border-white/5 w-full text-white">
-                    <p className="text-[10px] font-black text-white/40 uppercase mb-2">Client Instructions:</p>
-                    <p className="text-sm italic">"{selectedReq.client_comments}"</p>
-                  </div>
-                )}
+              <div className="bg-slate-900 p-10 overflow-auto flex justify-center items-start">
+                <img src={selectedReq.image_url} alt="Source" className="max-w-full shadow-2xl rounded-sm border-8 border-white/10" />
               </div>
 
-              <div className="p-8 flex flex-col bg-white overflow-hidden">
-                <div className="flex gap-2 mb-4">
-                    <button onClick={() => setShowLivePreview(false)} className={`px-4 py-2 rounded-lg text-[10px] font-black ${!showLivePreview ? 'bg-black text-white' : 'bg-slate-100 text-slate-400'}`}>EDITOR</button>
-                    <button onClick={() => setShowLivePreview(true)} className={`px-4 py-2 rounded-lg text-[10px] font-black ${showLivePreview ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-slate-100 text-slate-400'}`}>VISUAL PREVIEW</button>
+              <div className="p-10 flex flex-col bg-white overflow-hidden">
+                <div className="flex gap-4 mb-6">
+                    <button onClick={() => setShowLivePreview(false)} className={`flex-1 py-4 rounded-2xl text-[11px] font-black transition-all ${!showLivePreview ? 'bg-slate-900 text-white shadow-xl shadow-slate-200' : 'bg-slate-100 text-slate-400'}`}>TEXT_EDITOR</button>
+                    <button onClick={() => setShowLivePreview(true)} className={`flex-1 py-4 rounded-2xl text-[11px] font-black transition-all ${showLivePreview ? 'bg-blue-600 text-white shadow-xl shadow-blue-200' : 'bg-slate-100 text-slate-400'}`}>LIVE_DESIGN_PREVIEW</button>
                 </div>
 
-                <div className="flex-1 overflow-hidden border-2 border-slate-50 rounded-[2.5rem] bg-slate-50 shadow-inner relative">
+                <div className="flex-1 overflow-hidden border border-slate-100 rounded-[3rem] bg-slate-50/50 shadow-inner p-2">
                   {showLivePreview ? (
                     <iframe srcDoc={getPreviewHtml(editText)} className="w-full h-full border-none rounded-[2.5rem]" />
                   ) : (
-                    <ReactQuill theme="snow" value={editText} onChange={setEditText} modules={modules} className="h-full" />
+                    <ReactQuill theme="snow" value={editText} onChange={setEditText} modules={modules} className="h-full rounded-[2.5rem]" />
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="p-8 border-t bg-slate-50 flex justify-end gap-4 items-center">
-                <div className="mr-auto flex gap-6">
-                    <div className="text-center">
-                        <p className="text-[8px] font-black text-slate-400 uppercase">Apostille</p>
-                        <p className={`text-xs font-bold ${selectedReq.needs_apostille ? 'text-purple-600' : 'text-slate-300'}`}>{selectedReq.needs_apostille ? 'YES' : 'NO'}</p>
+            <div className="p-10 border-t bg-slate-50 flex justify-between items-center">
+                <div className="flex gap-10">
+                    <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Client</p>
+                        <p className="text-sm font-bold">{selectedReq.full_name}</p>
                     </div>
-                    <div className="text-center">
-                        <p className="text-[8px] font-black text-slate-400 uppercase">Physical Copy</p>
-                        <p className={`text-xs font-bold ${selectedReq.needs_physical_copy ? 'text-blue-600' : 'text-slate-300'}`}>{selectedReq.needs_physical_copy ? 'YES' : 'NO'}</p>
+                    <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Payment</p>
+                        <p className={`text-sm font-bold ${selectedReq.payment_status === 'paid' ? 'text-green-600' : 'text-red-500'}`}>
+                          {selectedReq.payment_status?.toUpperCase()}
+                        </p>
                     </div>
                 </div>
-                <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 px-4">CANCEL</button>
-                <button 
-                  onClick={handleFinalApprove} 
-                  disabled={isProcessing || selectedReq.payment_status !== 'paid'} 
-                  className="bg-black text-white px-12 py-4 rounded-2xl font-black text-[11px] hover:shadow-2xl transition disabled:opacity-20"
-                >
-                  {isProcessing ? "DISPATCHING..." : "CERTIFY & DISPATCH"}
-                </button>
+                
+                <div className="flex gap-4">
+                  <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 px-6">CANCEL_ORDER</button>
+                  <button 
+                    onClick={handleFinalApprove} 
+                    disabled={isProcessing || selectedReq.payment_status !== 'paid'} 
+                    className="bg-slate-900 text-white px-16 py-5 rounded-[2rem] font-black text-xs hover:bg-blue-600 hover:shadow-2xl hover:shadow-blue-200 transition-all disabled:opacity-20 flex items-center gap-3"
+                  >
+                    {isProcessing ? "GENERATING_SECURE_PDF..." : "CERTIFY & DISPATCH"}
+                  </button>
+                </div>
             </div>
           </div>
         </div>
       )}
       
       <style jsx global>{`
-        .ql-container { border: none !important; font-family: inherit; height: calc(100% - 42px); }
-        .ql-toolbar { border: none !important; border-bottom: 1px solid #f1f5f9 !important; padding: 12px !important; }
+        .ql-container { border: none !important; font-family: 'Times New Roman', serif !important; font-size: 16px; height: calc(100% - 60px); }
+        .ql-toolbar { border: none !important; background: white; border-radius: 2rem 2rem 0 0; padding: 15px !important; }
+        .ql-editor { padding: 40px !important; line-height: 1.8; }
       `}</style>
     </div>
   );
