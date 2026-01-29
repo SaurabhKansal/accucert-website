@@ -17,61 +17,53 @@ export async function POST(req: Request) {
     const codiaRes = await fetch('https://api.codia.ai/v1/open/image_to_design', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.CODIA_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_url: order.image_url, platform: 'web', framework: 'html' })
+      body: JSON.stringify({ 
+        image_url: order.image_url, 
+        platform: 'web', 
+        framework: 'html' 
+      })
     });
     const codiaData = await codiaRes.json();
-    const translationDesign = codiaData.data?.html || codiaData.code?.html || order.extracted_text;
+    const translationHtml = codiaData.data?.html || codiaData.code?.html || order.extracted_text;
 
-    // 2. Build the PDF Document HTML
-    const fullHtml = `
+    // 2. Build the Document HTML
+    const finalHtml = `
       <html>
-        <head><style>@page { margin: 0; } body { font-family: sans-serif; margin: 0; padding: 0; }</style></head>
+        <head><style>@page { margin: 0; } body { margin: 0; -webkit-print-color-adjust: exact; }</style></head>
         <body>
-          <div style="padding: 70px; height: 1000px; page-break-after: always; border-bottom: 2px solid #003461;">
+          <div style="padding: 60px; height: 1000px; page-break-after: always; border-bottom: 2px solid #003461; font-family: sans-serif;">
             <h1 style="color: #003461;">ACCUCERT</h1>
             <p>Date: ${new Date().toLocaleDateString()}</p>
             <hr/>
             <h2>CERTIFICATE OF ACCURACY</h2>
-            <p>Accucert hereby certifies the translation for <b>${order.full_name}</b> is accurate.</p>
-            <p style="margin-top: 100px;">__________________________<br/>Director of Certification</p>
+            <p>This is to certify that the translation for <b>${order.full_name}</b> is accurate.</p>
+            <p style="margin-top: 150px;">__________________________<br/>Director of Certification</p>
           </div>
-          <div style="width: 100%;">${translationDesign}</div>
+          <div style="width: 100%;">${translationHtml}</div>
         </body>
       </html>
     `;
 
-    // 3. Print via Api2Pdf (Using the most stable v2 endpoint)
+    // 3. Print via Api2Pdf
     const apiRes = await fetch('https://v2.api2pdf.com/chrome/pdf/html', {
       method: 'POST',
-      headers: { 
-        'Authorization': process.env.API2PDF_KEY!, 
-        'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify({ 
-        html: fullHtml, 
-        inline: false, 
-        fileName: `Accucert_${orderId.slice(0,5)}.pdf` 
-      })
+      headers: { 'Authorization': process.env.API2PDF_KEY!, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html: finalHtml, inline: false, options: { printBackground: true } })
     });
     
     const apiData = await apiRes.json();
+    const pdfUrl = apiData.FileUrl || apiData.fileUrl || apiData.pdf;
 
-    // --- CRITICAL FIX: The PDF Link can be in 3 different places ---
-    const finalFileUrl = apiData.FileUrl || apiData.fileUrl || apiData.pdf || apiData.url;
+    // 4. Fetch the PDF bytes
+    const pdfBuffer = await fetch(pdfUrl).then(res => res.arrayBuffer());
 
-    if (!finalFileUrl) {
-      console.error("API2PDF FULL RESPONSE:", apiData);
-      throw new Error(`Api2Pdf didn't return a link. Message: ${apiData.message || 'No message'}`);
-    }
-
-    // 4. Fetch the PDF and Dispatch
-    const pdfBuffer = await fetch(finalFileUrl).then(res => res.arrayBuffer());
-
+    // 5. DISPATCH (Fixed TypeScript Error)
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
-      to: order.user_email,
+      to: order.user_email.toString(), // Ensure 'to' is a string
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Hello ${order.full_name}, please find your official certified translation attached.</p>`,
+      text: `Hello ${order.full_name}, your official certified translation is attached.`, // REQUIRED FIELD
+      html: `<p>Hello ${order.full_name},</p><p>Please find your official certified translation attached as a PDF.</p>`, // OPTIONAL BUT RECOMMENDED
       attachments: [{ 
         filename: `Accucert_Certified_Doc.pdf`, 
         content: Buffer.from(pdfBuffer) 
@@ -82,7 +74,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("DEBUG_DISPATCH_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
