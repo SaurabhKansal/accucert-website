@@ -5,15 +5,6 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Helper to clean the Codia "Junk" while keeping the design
-function formatCodiaContent(html: string) {
-  return html
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ') // Fixes the crowded text issue
-    .trim();
-}
-
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
@@ -22,69 +13,76 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found');
 
-    // 1. GET THE FULL DESIGN FROM CODIA AI
+    // 1. Fetch the High-Fidelity Design from Codia
     const codiaRes = await fetch('https://api.codia.ai/v1/open/image_to_design', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.CODIA_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ image_url: order.image_url, platform: 'web', framework: 'html' })
     });
     const codiaData = await codiaRes.json();
-    
-    // This is the "Magic" - the full design HTML from Codia
-    const designHtml = formatCodiaContent(codiaData.data?.html || codiaData.code?.html || order.extracted_text);
+    const translationDesign = codiaData.data?.html || codiaData.code?.html || order.extracted_text;
 
-    // 2. CONSTRUCT A "PRINT-READY" DOCUMENT
-    // This uses CSS to force backgrounds to show up and keeps your letterhead professional
-    const finalHtmlDocument = `
+    // 2. Build a Print-Ready HTML Document
+    const fullHtml = `
+      <!DOCTYPE html>
       <html>
         <head>
           <style>
-            @media print { .no-print { display: none; } }
-            body { font-family: 'Helvetica', Arial, sans-serif; margin: 0; padding: 0; color: #333; }
-            .cert-page { padding: 80px; height: 1000px; border-bottom: 2px solid #eee; page-break-after: always; }
-            .design-container { width: 100%; min-height: 1100px; background: white; }
-            .header { border-bottom: 4px solid #003461; padding-bottom: 20px; margin-bottom: 40px; }
-            .stamp { width: 150px; height: 150px; border: 2px solid #003461; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #003461; font-weight: bold; font-size: 10px; text-align: center; float: right; }
+            @page { margin: 0; size: A4; }
+            body { font-family: Arial, sans-serif; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
+            .letter-head { height: 1000px; padding: 60px; page-break-after: always; position: relative; }
+            .footer-branding { position: absolute; bottom: 40px; left: 60px; font-size: 10px; color: #666; }
+            .design-layer { width: 100%; height: auto; }
           </style>
         </head>
         <body>
-          <div class="cert-page">
-            <div class="header">
-              <h1 style="font-size: 36px; margin: 0; color: #003461;">ACCUCERT</h1>
-              <p style="font-style: italic; margin: 0;">Certified Translation & Legalisation</p>
+          <div class="letter-head">
+            <h1 style="color: #003461; margin: 0; font-size: 32px;">ACCUCERT</h1>
+            <p style="font-style: italic; margin-top: 5px;">Certified Translation Services</p>
+            <div style="border-bottom: 2px solid #003461; margin: 20px 0;"></div>
+            <p style="text-align: right;">Date: ${new Date().toLocaleDateString()}</p>
+            <h2 style="margin-top: 50px;">CERTIFICATE OF TRANSLATION ACCURACY</h2>
+            <p>This is an official certification that the document titled <b>${order.document_type}</b> has been translated accurately from <b>${order.language_from}</b> to <b>${order.language_to}</b>.</p>
+            <div style="background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 30px 0;">
+               <strong>Order ID:</strong> ${orderId}<br/>
+               <strong>Client:</strong> ${order.full_name}
             </div>
-            <div class="stamp">OFFICIAL SEAL<br>ACCUCERT<br>VERIFIED</div>
-            <p>Date: ${new Date().toLocaleDateString()}</p>
-            <h2>CERTIFICATE OF ACCURACY</h2>
-            <p>This certifies that the attached translation for <strong>${order.full_name}</strong> is a true and accurate rendering of the original <strong>${order.document_type}</strong>.</p>
-            <div style="margin-top: 50px; padding: 20px; background: #f0f4f8; border-left: 5px solid #003461;">
-               Reference ID: ${orderId}<br>
-               Languages: ${order.language_from} to ${order.language_to}
-            </div>
-            <p style="margin-top: 100px;">__________________________<br>Director of Certification</p>
+            <p style="margin-top: 100px;">__________________________<br/>Director of Certification</p>
+            <div class="footer-branding">Accucert Ltd. Official Certification Document</div>
           </div>
 
-          <div class="design-container">
-            ${designHtml}
+          <div class="design-layer">
+            ${translationDesign}
           </div>
         </body>
       </html>
     `;
 
-    // 3. DISPATCH (As a beautifully formatted Email-to-PDF)
-    // We send this as the HTML body. When the user hits "Print" or you use a PDF converter, 
-    // the CSS ensures the design background is preserved.
+    // 3. Render PDF via Api2Pdf (Preserves the design!)
+    const apiRes = await fetch('https://v2.api2pdf.com/chrome/html', {
+      method: 'POST',
+      headers: { 'Authorization': process.env.API2PDF_KEY!, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html: fullHtml, inline: false, fileName: `Certified_${order.full_name}.pdf` })
+    });
+    
+    const apiData = await apiRes.json();
+    if (!apiData.FileUrl) throw new Error("PDF Printing Failed - Check Api2Pdf Credits");
+
+    const pdfBuffer = await fetch(apiData.FileUrl).then(res => res.arrayBuffer());
+
+    // 4. Send Email with Professional Attachment
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: finalHtmlDocument,
+      html: `<p>Hello ${order.full_name}, your official certified translation is attached.</p>`,
+      attachments: [{ filename: `Accucert_Certified_${orderId.slice(0,6)}.pdf`, content: Buffer.from(pdfBuffer) }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
     return NextResponse.json({ success: true });
 
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
