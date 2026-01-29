@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -13,50 +14,61 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found');
 
-    // 1. GET THE FULL DESIGN FROM CODIA AI
-    const codiaRes = await fetch('https://api.codia.ai/v1/open/image_to_design', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.CODIA_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_url: order.image_url, platform: 'web', framework: 'html' })
-    });
-    const codiaData = await codiaRes.json();
-    const translationHtml = codiaData.data?.html || codiaData.code?.html || order.extracted_text;
+    // 1. CREATE PDF DOCUMENT
+    const pdfDoc = await PDFDocument.create();
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const margin = 50;
+    const pageWidth = 595.28;
+    const pageHeight = 841.89;
 
-    // 2. CONSTRUCT THE EMAIL BODY (Letter + Design)
-    // We use "page-break" CSS so that when they print the email, it stays on separate pages.
-    const emailHtml = `
-      <div style="font-family: sans-serif; background-color: #f9f9f9; padding: 20px;">
-        <div style="max-width: 800px; margin: auto; background: white; border: 1px solid #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-          
-          <div style="padding: 60px; border-bottom: 2px solid #eee; page-break-after: always;">
-            <h1 style="margin:0; font-size: 28px; color: #000;">ACCUCERT</h1>
-            <p style="font-style: italic; color: #666; margin-bottom: 30px;">Official Translation Services</p>
-            <hr/>
-            <h2 style="margin-top: 40px;">CERTIFICATE OF ACCURACY</h2>
-            <p>This is to certify that the attached document is a true and accurate translation.</p>
-            <div style="background: #f4f4f4; padding: 20px; border-radius: 8px; margin: 20px 0;">
-              <strong>Client:</strong> ${order.full_name}<br>
-              <strong>Document:</strong> ${order.document_type}<br>
-              <strong>Order ID:</strong> ${orderId}
-            </div>
-            <p style="margin-top: 60px;"><strong>Director of Certification</strong></p>
-            <p style="font-size: 12px; color: #999;">(Print this email to save as an official PDF)</p>
-          </div>
+    // --- PAGE 1: THE CERTIFYING LETTER (Automated Branding) ---
+    const page1 = pdfDoc.addPage([pageWidth, pageHeight]);
+    
+    // Header Branding Block
+    page1.drawRectangle({ x: 0, y: pageHeight - 100, width: pageWidth, height: 100, color: rgb(0.05, 0.1, 0.2) });
+    page1.drawText('ACCUCERT', { x: margin, y: pageHeight - 65, size: 28, font: boldFont, color: rgb(1, 1, 1) });
+    page1.drawText('Official Certification of Translation Accuracy', { x: margin, y: pageHeight - 85, size: 10, font, color: rgb(0.8, 0.8, 0.8) });
 
-          <div style="padding: 0; width: 100%; overflow: hidden;">
-            ${translationHtml}
-          </div>
+    // Certificate Content
+    page1.drawText(`Date: ${new Date().toLocaleDateString()}`, { x: margin, y: pageHeight - 150, size: 10, font });
+    page1.drawText('To Whom It May Concern,', { x: margin, y: pageHeight - 190, size: 12, font: boldFont });
+    
+    const certText = `This is to certify that the document titled "${order.document_type}" has been translated from ${order.language_from} to ${order.language_to} by a professional linguist qualified by Accucert. We further certify that, to the best of our knowledge and belief, the attached translation is a true, complete, and accurate rendering of the original source.`;
 
-        </div>
-      </div>
-    `;
+    page1.drawText(certText, { x: margin, y: pageHeight - 220, size: 11, font, maxWidth: pageWidth - (margin * 2), lineHeight: 16 });
 
-    // 3. DISPATCH (No PDF service needed!)
+    // Client Details Table
+    page1.drawRectangle({ x: margin, y: 400, width: pageWidth - 100, height: 100, color: rgb(0.95, 0.95, 0.95) });
+    page1.drawText('CERTIFICATION DETAILS', { x: margin + 10, y: 485, size: 9, font: boldFont, color: rgb(0.4, 0.4, 0.4) });
+    page1.drawText(`Client Name: ${order.full_name}`, { x: margin + 10, y: 460, size: 11, font });
+    page1.drawText(`Reference ID: ${orderId}`, { x: margin + 10, y: 440, size: 11, font });
+    page1.drawText(`Document: ${order.document_type}`, { x: margin + 10, y: 420, size: 11, font });
+
+    // Stamp & Signature Area
+    page1.drawText('DIRECTOR OF CERTIFICATION', { x: margin, y: 150, size: 10, font: boldFont });
+    page1.drawLine({ start: { x: margin, y: 110 }, end: { x: margin + 200, y: 110 }, thickness: 1 });
+    page1.drawText('Accucert Official Seal', { x: margin, y: 95, size: 8, font, color: rgb(0.6, 0.6, 0.6) });
+
+    // --- PAGE 2: THE TRANSLATED CONTENT ---
+    const page2 = pdfDoc.addPage([pageWidth, pageHeight]);
+    page2.drawText('TRANSLATED TEXT', { x: margin, y: pageHeight - 60, size: 14, font: boldFont });
+    
+    const cleanText = (order.extracted_text || "").replace(/<[^>]*>/g, ' '); 
+    page2.drawText(cleanText, { x: margin, y: pageHeight - 100, size: 11, font, maxWidth: pageWidth - (margin * 2), lineHeight: 15 });
+
+    const pdfBytes = await pdfDoc.save();
+
+    // 3. SEND EMAIL WITH PDF ATTACHMENT
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
-      subject: `Your Certified Translation: ${order.full_name}`,
-      html: emailHtml,
+      subject: `Official Certified Translation: ${order.full_name}`,
+      html: `<p>Hello ${order.full_name}, your official certified translation is attached as a PDF.</p>`,
+      attachments: [{
+        filename: `Accucert_Certified_Translation.pdf`,
+        content: Buffer.from(pdfBytes),
+      }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
