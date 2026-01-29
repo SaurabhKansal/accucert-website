@@ -19,13 +19,13 @@ export async function POST(req: Request) {
       .eq('id', orderId)
       .single();
 
-    if (dbErr || !order) throw new Error('Order not found.');
+    if (dbErr || !order) throw new Error('Order not found in database.');
 
-    // 1. CALL GROK-VISION-BETA (The "Total AI" Prompt)
-    const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
+    // 1. CALL GROK-VISION-BETA
+    const grokRes = await fetch('[https://api.x.ai/v1/chat/completions](https://api.x.ai/v1/chat/completions)', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+        'Authorization': `Bearer ${process.env.XAI_API_KEY?.trim()}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -36,13 +36,11 @@ export async function POST(req: Request) {
             content: [
               {
                 type: "text",
-                text: `You are a legal document architect. Recreate this document in English.
+                text: `Task: Recreate this document in English.
                 - TRANSLATION: "${order.extracted_text}"
-                - DESIGN: Mimic the font families (Serif/Sans), exact colors, and spatial layout.
-                - LAYOUT: Use absolute positioning or flexbox to match the original line-by-line.
-                - BORDERS: If there are borders or seals, recreate them using Tailwind CSS.
-                - FORMAT: Return ONLY the HTML inside a single <div>. Do not use markdown code blocks (no backticks). 
-                - SAFETY: Ensure all text fits within a 210mm width to avoid overflow.`
+                - STYLE: Mimic all colors, fonts, and the spatial layout exactly.
+                - LAYOUT: Use absolute positioning in CSS so it matches the image 1:1.
+                - OUTPUT: Provide ONLY the raw HTML code starting with <div>. Do not include markdown tags, backticks, or explanations.`
               },
               {
                 type: "image_url",
@@ -57,10 +55,12 @@ export async function POST(req: Request) {
     const grokData = await grokRes.json();
     let replicatedHtml = grokData.choices?.[0]?.message?.content || "";
 
-    // CLEANUP: Remove any accidental markdown backticks (e.g., ```html)
-    replicatedHtml = replicatedHtml.replace(/```html|```/g, "").trim();
+    // CLEANUP: Extract only the HTML if Grok includes markdown or backticks
+    if (replicatedHtml.includes('```')) {
+      replicatedHtml = replicatedHtml.split('```')[1].replace('html', '').trim();
+    }
 
-    // 2. CONSTRUCT THE PDF WITH RENDERING SAFEGUARDS
+    // 2. CONSTRUCT THE DOCUMENT (Strict sizing to prevent overflow)
     const finalHtml = `
       <!DOCTYPE html>
       <html>
@@ -68,63 +68,64 @@ export async function POST(req: Request) {
           <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
           <style>
             @page { margin: 0; size: A4; }
-            body { margin: 0; padding: 0; background: white; -webkit-print-color-adjust: exact !important; }
-            .a4-page { width: 210mm; height: 297mm; position: relative; overflow: hidden; page-break-after: always; }
-            /* This ensures the AI content is centered and fits the page */
-            .ai-content { width: 100%; height: 100%; padding: 15mm; box-sizing: border-box; }
+            body { margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; }
+            .pdf-container { width: 210mm; height: 297mm; position: relative; overflow: hidden; page-break-after: always; }
           </style>
         </head>
         <body>
-          <div class="a4-page" style="padding: 80px; font-family: sans-serif;">
-            <h1 style="color: #003461; margin: 0; font-size: 38px;">ACCUCERT</h1>
-            <p style="font-weight: bold; color: #666;">Official Document Legalisation</p>
-            <hr style="border: 2.5px solid #003461; margin: 30px 0;"/>
+          <div class="pdf-container" style="padding: 80px; font-family: sans-serif; background: white;">
+            <h1 style="color: #003461; margin: 0; font-size: 42px;">ACCUCERT</h1>
+            <p style="color: #666; font-weight: bold; letter-spacing: 1px;">Official Certification Authority</p>
+            <hr style="border: 2px solid #003461; margin: 30px 0;"/>
             <p style="text-align: right;">Date: ${new Date().toLocaleDateString()}</p>
-            <h2 style="margin-top: 50px;">CERTIFICATE OF ACCURACY</h2>
-            <p>Certified for: <b>${order.full_name}</b></p>
-            <p>Document: <b>${order.document_type}</b></p>
+            <h2 style="margin-top: 60px; font-size: 24px;">CERTIFICATE OF ACCURACY</h2>
+            <p>This is to certify that the attached document is a true English translation for <b>${order.full_name}</b>.</p>
             <div style="margin-top: 200px; border-top: 1px solid #000; width: 250px; padding-top: 10px;">
-              Director of Certification
+              Authorized Signature
             </div>
           </div>
 
-          <div class="a4-page">
-            <div class="ai-content">
-              ${replicatedHtml}
-            </div>
+          <div class="pdf-container">
+            ${replicatedHtml}
           </div>
         </body>
       </html>
     `;
 
-    // 3. PRINT TO PDF (With High-Stability Settings)
-    const apiRes = await fetch('[https://v2.api2pdf.com/chrome/pdf/html](https://v2.api2pdf.com/chrome/pdf/html)', {
+    // 3. PRINT TO PDF (Using the sanitized URL)
+    const apiEndpoint = "[https://v2.api2pdf.com/chrome/pdf/html](https://v2.api2pdf.com/chrome/pdf/html)";
+    const apiRes = await fetch(apiEndpoint, {
       method: 'POST',
-      headers: { 'Authorization': process.env.API2PDF_KEY!, 'Content-Type': 'application/json' },
+      headers: { 
+        'Authorization': process.env.API2PDF_KEY!.trim(), 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({ 
         html: finalHtml, 
         inline: false, 
         options: { 
           printBackground: true, 
-          waitForNetworkIdle: true, // WAITS FOR TAILWIND AND FONTS
-          useLatestChrome: true 
+          waitForNetworkIdle: true 
         } 
       })
     });
     
     const apiData = await apiRes.json();
-    const pdfUrl = apiData.FileUrl || apiData.fileUrl;
+    const pdfUrl = apiData.FileUrl || apiData.fileUrl || apiData.pdf;
 
-    if (!pdfUrl) throw new Error("PDF failed to render. Grok output might be too complex or API2PDF balance low.");
+    if (!pdfUrl) {
+      console.error("API2PDF Error:", apiData);
+      throw new Error(`PDF URL missing. API Response: ${JSON.stringify(apiData)}`);
+    }
 
     const pdfBuffer = await fetch(pdfUrl).then(res => res.arrayBuffer());
 
     // 4. DISPATCH
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
-      to: order.user_email,
+      to: order.user_email.toString(),
       subject: `Official Certified Translation: ${order.full_name}`,
-      text: `Your official certified translation is attached.`,
+      text: `Your certified translation is attached.`,
       html: `<p>Hello ${order.full_name}, your official translation is attached.</p>`,
       attachments: [{ 
         filename: `Accucert_Translation.pdf`, 
@@ -132,11 +133,11 @@ export async function POST(req: Request) {
       }],
     });
 
-    await supabase.from('translations').update({ status: 'completed' }).eq( 'id', orderId);
+    await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("DISPATCH_FAILURE:", err.message);
+    console.error("DISPATCH_CRITICAL_FAILURE:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
