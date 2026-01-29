@@ -3,76 +3,108 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!, 
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // 1. Fetch Order Data
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
+
     if (!order) throw new Error('Order not found');
 
-    // 2. Call Codia AI to generate the Refined Design
-    // Codia converts the original image layout into high-quality HTML
-    const codiaResponse = await fetch('https://api.codia.ai/v1/open/image_to_design', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.CODIA_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        image_url: order.image_url,
-        platform: 'web',
-        framework: 'html'
-      })
+    // 1. CREATE PDF DOCUMENT
+    const pdfDoc = await PDFDocument.create();
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const italicFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+
+    // --- PAGE 1: OFFICIAL CERTIFYING LETTER ---
+    const coverPage = pdfDoc.addPage([595.28, 841.89]);
+    const { width, height } = coverPage.getSize();
+    const margin = 60;
+
+    // Header / Branding
+    coverPage.drawText('ACCUCERT', { x: margin, y: height - 60, size: 24, font: boldFont, color: rgb(0, 0, 0) });
+    coverPage.drawText('Official Translation & Legalisation Services', { x: margin, y: height - 80, size: 10, font: italicFont });
+    coverPage.drawLine({ start: { x: margin, y: height - 95 }, end: { x: width - margin, y: height - 95 }, thickness: 1 });
+
+    // Date and Subject
+    coverPage.drawText(`Date: ${new Date().toLocaleDateString()}`, { x: margin, y: height - 130, size: 10, font });
+    coverPage.drawText('CERTIFICATE OF TRANSLATION ACCURACY', { x: margin, y: height - 170, size: 16, font: boldFont });
+
+    // Standard Wording (Automated)
+    const bodyText = [
+      `To Whom It May Concern,`,
+      ``,
+      `Accucert Translation Services hereby certifies that the attached document is a true, complete, and`,
+      `accurate translation of the original text provided to us for processing.`,
+      ``,
+      `Order Details:`,
+      `• Client Name: ${order.full_name}`,
+      `• Document Type: ${order.document_type || 'Official Document'}`,
+      `• Language Pair: ${order.language_from} to ${order.language_to}`,
+      `• Reference Number: ${orderId}`,
+      ``,
+      `I further certify that I am competent in both languages and that this translation has been`,
+      `verified by our internal quality control team to meet international certification standards.`,
+      ``,
+      `This certification is valid for legal, academic, and governmental submissions.`,
+    ];
+
+    let currentY = height - 210;
+    bodyText.forEach(line => {
+      coverPage.drawText(line, { x: margin, y: currentY, size: 11, font, lineHeight: 16 });
+      currentY -= 16;
     });
 
-    const codiaData = await codiaResponse.json();
-    if (!codiaResponse.ok) throw new Error(codiaData.message || 'Codia AI failed');
+    // Signature Area (Automated Stamp/Placeholders)
+    coverPage.drawText('Authorized Signature:', { x: margin, y: 150, size: 10, font: boldFont });
+    coverPage.drawLine({ start: { x: margin, y: 110 }, end: { x: margin + 150, y: 110 }, thickness: 1 });
+    coverPage.drawText('Director of Certification', { x: margin, y: 95, size: 9, font });
 
-    // 3. Inject Edited Translation into the Codia Layout
-    // We take the high-fidelity HTML from Codia and ensure your edits are used
-    let finalHtml = codiaData.data?.html || codiaData.code?.html;
+    // --- PAGE 2: THE TRANSLATION ---
+    const transPage = pdfDoc.addPage([595.28, 841.89]);
+    transPage.drawText('TRANSLATED DOCUMENT', { x: margin, y: height - 60, size: 14, font: boldFont });
     
-    // Simple injection: We wrap the Codia design with our Certification Header
-    const professionalLayout = `
-      <div style="font-family: sans-serif; max-width: 800px; margin: auto; border: 1px solid #eee; padding: 40px;">
-        <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 30px;">
-          <h1 style="margin: 0; font-size: 24px; letter-spacing: 2px;">CERTIFIED TRANSLATION</h1>
-          <p style="font-size: 10px; color: #666;">Order ID: ${orderId} | Date: ${new Date().toLocaleDateString()}</p>
-        </div>
-        
-        ${finalHtml || order.extracted_text}
+    // Process the text from Codia / Editor
+    const cleanText = (order.extracted_text || "").replace(/<[^>]*>/g, ' '); // Clean HTML
+    transPage.drawText(cleanText, {
+      x: margin,
+      y: height - 100,
+      size: 10,
+      font,
+      maxWidth: width - (margin * 2),
+      lineHeight: 14,
+    });
 
-        <div style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; font-style: italic;">
-          This is an official certified translation issued by Accucert for ${order.full_name}.
-        </div>
-      </div>
-    `;
+    // 2. SAVE & ATTACH
+    const pdfBytes = await pdfDoc.save();
 
-    // 4. Dispatch Email
-    // Since Codia generates HTML, we send this as a "Printable HTML Email"
-    // Users can "Save as PDF" directly from their email client for 100% layout accuracy
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>', 
       to: order.user_email,
-      subject: 'Your Certified Translation is Ready',
-      html: professionalLayout,
+      subject: 'Your Official Certified Translation is Attached',
+      html: `
+        <p>Hello ${order.full_name},</p>
+        <p>Your official certified translation for the <b>${order.document_type}</b> is now ready.</p>
+        <p>Please find the certified PDF file attached to this email. You can download and print this for your records.</p>
+        <br/>
+        <p>Thank you for choosing Accucert.</p>
+      `,
+      attachments: [{
+        filename: `Accucert_Certified_${order.full_name.replace(/\s+/g, '_')}.pdf`,
+        content: Buffer.from(pdfBytes), // Attaches as a downloadable file
+      }],
     });
 
-    // 5. Update Status
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
-
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
-    console.error('Codia Dispatch Error:', error.message);
+    console.error('API Error:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
