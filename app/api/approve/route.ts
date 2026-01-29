@@ -2,9 +2,17 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Helper to clean the Codia "Junk" while keeping the design
+function formatCodiaContent(html: string) {
+  return html
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ') // Fixes the crowded text issue
+    .trim();
+}
 
 export async function POST(req: Request) {
   try {
@@ -14,61 +22,63 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found');
 
-    // 1. CREATE PDF DOCUMENT
-    const pdfDoc = await PDFDocument.create();
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const margin = 50;
-    const pageWidth = 595.28;
-    const pageHeight = 841.89;
-
-    // --- PAGE 1: THE CERTIFYING LETTER (Automated Branding) ---
-    const page1 = pdfDoc.addPage([pageWidth, pageHeight]);
+    // 1. GET THE FULL DESIGN FROM CODIA AI
+    const codiaRes = await fetch('https://api.codia.ai/v1/open/image_to_design', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.CODIA_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_url: order.image_url, platform: 'web', framework: 'html' })
+    });
+    const codiaData = await codiaRes.json();
     
-    // Header Branding Block
-    page1.drawRectangle({ x: 0, y: pageHeight - 100, width: pageWidth, height: 100, color: rgb(0.05, 0.1, 0.2) });
-    page1.drawText('ACCUCERT', { x: margin, y: pageHeight - 65, size: 28, font: boldFont, color: rgb(1, 1, 1) });
-    page1.drawText('Official Certification of Translation Accuracy', { x: margin, y: pageHeight - 85, size: 10, font, color: rgb(0.8, 0.8, 0.8) });
+    // This is the "Magic" - the full design HTML from Codia
+    const designHtml = formatCodiaContent(codiaData.data?.html || codiaData.code?.html || order.extracted_text);
 
-    // Certificate Content
-    page1.drawText(`Date: ${new Date().toLocaleDateString()}`, { x: margin, y: pageHeight - 150, size: 10, font });
-    page1.drawText('To Whom It May Concern,', { x: margin, y: pageHeight - 190, size: 12, font: boldFont });
-    
-    const certText = `This is to certify that the document titled "${order.document_type}" has been translated from ${order.language_from} to ${order.language_to} by a professional linguist qualified by Accucert. We further certify that, to the best of our knowledge and belief, the attached translation is a true, complete, and accurate rendering of the original source.`;
+    // 2. CONSTRUCT A "PRINT-READY" DOCUMENT
+    // This uses CSS to force backgrounds to show up and keeps your letterhead professional
+    const finalHtmlDocument = `
+      <html>
+        <head>
+          <style>
+            @media print { .no-print { display: none; } }
+            body { font-family: 'Helvetica', Arial, sans-serif; margin: 0; padding: 0; color: #333; }
+            .cert-page { padding: 80px; height: 1000px; border-bottom: 2px solid #eee; page-break-after: always; }
+            .design-container { width: 100%; min-height: 1100px; background: white; }
+            .header { border-bottom: 4px solid #003461; padding-bottom: 20px; margin-bottom: 40px; }
+            .stamp { width: 150px; height: 150px; border: 2px solid #003461; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #003461; font-weight: bold; font-size: 10px; text-align: center; float: right; }
+          </style>
+        </head>
+        <body>
+          <div class="cert-page">
+            <div class="header">
+              <h1 style="font-size: 36px; margin: 0; color: #003461;">ACCUCERT</h1>
+              <p style="font-style: italic; margin: 0;">Certified Translation & Legalisation</p>
+            </div>
+            <div class="stamp">OFFICIAL SEAL<br>ACCUCERT<br>VERIFIED</div>
+            <p>Date: ${new Date().toLocaleDateString()}</p>
+            <h2>CERTIFICATE OF ACCURACY</h2>
+            <p>This certifies that the attached translation for <strong>${order.full_name}</strong> is a true and accurate rendering of the original <strong>${order.document_type}</strong>.</p>
+            <div style="margin-top: 50px; padding: 20px; background: #f0f4f8; border-left: 5px solid #003461;">
+               Reference ID: ${orderId}<br>
+               Languages: ${order.language_from} to ${order.language_to}
+            </div>
+            <p style="margin-top: 100px;">__________________________<br>Director of Certification</p>
+          </div>
 
-    page1.drawText(certText, { x: margin, y: pageHeight - 220, size: 11, font, maxWidth: pageWidth - (margin * 2), lineHeight: 16 });
+          <div class="design-container">
+            ${designHtml}
+          </div>
+        </body>
+      </html>
+    `;
 
-    // Client Details Table
-    page1.drawRectangle({ x: margin, y: 400, width: pageWidth - 100, height: 100, color: rgb(0.95, 0.95, 0.95) });
-    page1.drawText('CERTIFICATION DETAILS', { x: margin + 10, y: 485, size: 9, font: boldFont, color: rgb(0.4, 0.4, 0.4) });
-    page1.drawText(`Client Name: ${order.full_name}`, { x: margin + 10, y: 460, size: 11, font });
-    page1.drawText(`Reference ID: ${orderId}`, { x: margin + 10, y: 440, size: 11, font });
-    page1.drawText(`Document: ${order.document_type}`, { x: margin + 10, y: 420, size: 11, font });
-
-    // Stamp & Signature Area
-    page1.drawText('DIRECTOR OF CERTIFICATION', { x: margin, y: 150, size: 10, font: boldFont });
-    page1.drawLine({ start: { x: margin, y: 110 }, end: { x: margin + 200, y: 110 }, thickness: 1 });
-    page1.drawText('Accucert Official Seal', { x: margin, y: 95, size: 8, font, color: rgb(0.6, 0.6, 0.6) });
-
-    // --- PAGE 2: THE TRANSLATED CONTENT ---
-    const page2 = pdfDoc.addPage([pageWidth, pageHeight]);
-    page2.drawText('TRANSLATED TEXT', { x: margin, y: pageHeight - 60, size: 14, font: boldFont });
-    
-    const cleanText = (order.extracted_text || "").replace(/<[^>]*>/g, ' '); 
-    page2.drawText(cleanText, { x: margin, y: pageHeight - 100, size: 11, font, maxWidth: pageWidth - (margin * 2), lineHeight: 15 });
-
-    const pdfBytes = await pdfDoc.save();
-
-    // 3. SEND EMAIL WITH PDF ATTACHMENT
+    // 3. DISPATCH (As a beautifully formatted Email-to-PDF)
+    // We send this as the HTML body. When the user hits "Print" or you use a PDF converter, 
+    // the CSS ensures the design background is preserved.
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Hello ${order.full_name}, your official certified translation is attached as a PDF.</p>`,
-      attachments: [{
-        filename: `Accucert_Certified_Translation.pdf`,
-        content: Buffer.from(pdfBytes),
-      }],
+      html: finalHtmlDocument,
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
