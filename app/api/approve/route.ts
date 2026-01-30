@@ -14,7 +14,7 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found.');
 
-    // 1. GROK: GET THE DESIGN SPECS & TRANSLATION
+    // 1. PASS 1: GROK - CREATE THE LAYOUT MAP
     const grokRes = await fetch("https://api.x.ai/v1/chat/completions", {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY?.trim()}`, 'Content-Type': 'application/json' },
@@ -23,41 +23,53 @@ export async function POST(req: Request) {
         messages: [{
           role: "user",
           content: [
-            { type: "text", text: `Analyze the original Spanish document layout.
-              - BACKGROUND: Identify the exact HEX background color of the paper.
-              - TRANSLATION: Translate all content to English using this: "${order.extracted_text}".
-              - MAPPING: Return ONLY a JSON object: 
-                {"bgColor": "#hex", "blocks": [{"text": "English", "x": 10, "y": 20, "size": 30, "bold": true}]}` 
-            },
+            { type: "text", text: `Analyze this document. Identify every Spanish text block.
+              - Provide the professional English translation for each block.
+              - Return ONLY a JSON object: {"blocks": [{"text": "English", "x": 10.5, "y": 20.0, "size": 32, "bold": true}]}.
+              - Use Percentage coordinates (0-100).` },
             { type: "image_url", image_url: { url: order.image_url } }
           ]
-        }]
+        }],
+        temperature: 0
       })
     });
 
     const grokData = await grokRes.json();
     const jsonMatch = grokData.choices[0].message.content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Grok failed to map the document.");
     const blueprint = JSON.parse(jsonMatch[0]);
 
-    // 2. DOWNLOAD ORIGINAL (To keep the Border/Seal)
-    const originalBuffer = await fetch(order.image_url).then(r => r.arrayBuffer());
-    const metadata = await sharp(Buffer.from(originalBuffer)).metadata();
+    // 2. PASS 2: STABILITY AI - THE "CLEAN SLATE" ERASE
+    const formData = new FormData();
+    formData.append('image', await fetch(order.image_url).then(r => r.blob()));
+    formData.append('mask_prompt', "all text, handwriting, and ink characters"); 
+    formData.append('output_format', 'png');
+
+    const stabilityRes = await fetch("https://api.stability.ai/v2beta/stable-image/edit/erase", {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`, 'Accept': 'image/*' },
+      body: formData
+    });
+
+    if (!stabilityRes.ok) throw new Error("Stability AI failed to clean the image.");
+    const cleanImageBuffer = await stabilityRes.arrayBuffer();
+
+    // 3. PASS 3: SHARP - THE PIXEL-PERFECT PRINT
+    const metadata = await sharp(Buffer.from(cleanImageBuffer)).metadata();
     const { width = 1000, height = 1414 } = metadata;
 
-    // 3. CREATE A CLEAN "PAPER" RECTANGLE 
-    // This covers the Spanish text areas but leaves the border and seal visible
     const svgOverlay = `
       <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-        <rect x="${width * 0.08}" y="${height * 0.08}" width="${width * 0.84}" height="${height * 0.75}" fill="${blueprint.bgColor}" />
-        
+        <style>
+          .txt { font-family: 'Times New Roman', serif; fill: #1a1a1a; }
+        </style>
         ${blueprint.blocks.map((b: any) => `
           <text 
             x="${(b.x * width) / 100}" 
             y="${(b.y * height) / 100}" 
-            font-family="serif" 
             font-size="${(b.size * width) / 1000}" 
             font-weight="${b.bold ? 'bold' : 'normal'}" 
-            fill="#2d2d2d"
+            class="txt"
           >
             ${b.text}
           </text>
@@ -65,18 +77,17 @@ export async function POST(req: Request) {
       </svg>
     `;
 
-    // 4. MERGE (Sharp puts the clean paper + text OVER the original image)
-    const finalImage = await sharp(Buffer.from(originalBuffer))
+    const finalImage = await sharp(Buffer.from(cleanImageBuffer))
       .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
       .jpeg({ quality: 95 })
       .toBuffer();
 
-    // 5. DISPATCH
+    // 4. DISPATCH THE FINAL RESULT
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email.toString(),
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Your certified English translation is attached.</p>`,
+      html: `<p>Your official translation is attached, reconstructed to match the original design.</p>`,
       attachments: [{ filename: `Accucert_Translation.jpg`, content: finalImage }],
     });
 
@@ -84,6 +95,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
+    console.error("PIXEL_RECON_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
