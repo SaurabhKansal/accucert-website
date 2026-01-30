@@ -121,7 +121,13 @@ export default function Home() {
         </div>
       )}
 
-      <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="application/pdf,image/*" className="hidden" />
+<input 
+  type="file" 
+  ref={fileInputRef} 
+  onChange={handleFileChange} 
+  accept=".jpg, .jpeg, .png, .pdf, .doc, .docx, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document" 
+  className="hidden" 
+/>
 
       {/* LOADING OVERLAY */}
       {isUploading && (
