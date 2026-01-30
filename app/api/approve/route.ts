@@ -14,8 +14,7 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found.');
 
-    // 1. USE GROK TO FIND THE "MASK" AREAS
-    // We need to tell Stability AI exactly which areas to erase.
+    // 1. GET THE COORDINATES FROM GROK-2-VISION-1212
     const grokRes = await fetch("https://api.x.ai/v1/chat/completions", {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY?.trim()}`, 'Content-Type': 'application/json' },
@@ -24,10 +23,10 @@ export async function POST(req: Request) {
         messages: [{
           role: "user",
           content: [
-            { type: "text", text: `Analyze this image. Find every Spanish word and return a JSON map.
-              - PROMPT: "all spanish text and handwriting"
-              - BLOCKS: [{"english": "Translation", "x": 10, "y": 20, "w": 30, "h": 5, "size": 24}]` 
-            },
+            { type: "text", text: `Analyze this image and return a JSON object ONLY. 
+              Find every Spanish text block and map it to an English translation.
+              Format: {"blocks": [{"english": "Text", "x": 10, "y": 20, "size": 18, "color": "#000000"}]}
+              Important: Return ONLY the JSON. No conversational text.` },
             { type: "image_url", image_url: { url: order.image_url } }
           ]
         }]
@@ -35,14 +34,20 @@ export async function POST(req: Request) {
     });
 
     const grokData = await grokRes.json();
-    const blueprint = JSON.parse(grokData.choices[0].message.content.replace(/```json|```/g, ""));
+    let rawContent = grokData.choices[0].message.content;
 
-    // 2. STABILITY AI INPAINTING (The "Magic Eraser")
-    // This removes the text while keeping the paper texture perfectly intact.
+    // --- THE "H" ERROR FIX: STRICT JSON EXTRACTION ---
+    // This finds the first { and the last } and ignores everything else.
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Grok did not return a valid JSON object.");
+    const blueprint = JSON.parse(jsonMatch[0]);
+
+    // 2. STABILITY AI: SEARCH & REPLACE (Inpainting)
+    // This removes the Spanish text and fills it with the original paper texture.
     const formData = new FormData();
     formData.append('image', await fetch(order.image_url).then(r => r.blob()));
-    formData.append('prompt', "remove all text and handwriting, leave only the clean paper texture and background designs");
-    formData.append('search_prompt', "text, letters, handwriting, stamps with text");
+    formData.append('search_prompt', "Spanish text, handwriting, ink, letters");
+    formData.append('prompt', "clean background paper texture, blank document paper");
     formData.append('output_format', 'webp');
 
     const stabilityRes = await fetch("https://api.stability.ai/v2beta/stable-image/edit/search-and-replace", {
@@ -54,15 +59,18 @@ export async function POST(req: Request) {
       body: formData
     });
 
-    if (!stabilityRes.ok) throw new Error("Stability AI failed to clean the image.");
+    if (!stabilityRes.ok) {
+        const errText = await stabilityRes.text();
+        throw new Error(`Stability AI Error: ${errText}`);
+    }
     const cleanImageBuffer = await stabilityRes.arrayBuffer();
 
-    // 3. SHARP: OVERLAY THE ENGLISH
-    // Now we take the "Clean" document and stamp the English text onto the blueprint coordinates.
+    // 3. SHARP: OVERLAY THE TRANSLATION
+    // We take the clean "blank" document and draw the English text on top.
     const svgOverlay = `
-      <svg width="1000" height="1414">
+      <svg width="1000" height="1414" viewBox="0 0 100 141.4">
         ${blueprint.blocks.map((b: any) => `
-          <text x="${b.x}%" y="${b.y + b.h}%" font-family="serif" font-size="${b.size}px" fill="black">
+          <text x="${b.x}" y="${b.y}" font-family="serif" font-size="${b.size / 10}" fill="${b.color || 'black'}">
             ${b.english}
           </text>
         `).join('')}
@@ -71,21 +79,26 @@ export async function POST(req: Request) {
 
     const finalImage = await sharp(Buffer.from(cleanImageBuffer))
       .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
+      .jpeg()
       .toBuffer();
 
-    // 4. DISPATCH
+    // 4. DISPATCH EMAIL
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
-      to: order.user_email,
+      to: order.user_email.toString(),
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Your document has been translated and inpainted into the original design.</p>`,
-      attachments: [{ filename: `Accucert_Translation.jpg`, content: finalImage }],
+      html: `<p>Your official translation is attached.</p>`, // Required for Resend SDK
+      attachments: [{ 
+        filename: `Accucert_Translation.jpg`, 
+        content: finalImage 
+      }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
+    console.error("CRITICAL_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
