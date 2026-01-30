@@ -13,13 +13,12 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found.');
 
-    const auth = {
-      apiKey: process.env.AITRANSLATE_API_KEY,
-      apiSecret: process.env.AITRANSLATE_API_SECRET
+    const auth = { 
+      apiKey: process.env.AITRANSLATE_API_KEY, 
+      apiSecret: process.env.AITRANSLATE_API_SECRET 
     };
 
-    // 1. INITIATE ASYNC TRANSLATION (/translate/file)
-    // This is the "magic" step that reconstructs the image.
+    // 1. INITIATE HIGH-QUALITY TRANSLATION
     const startJob = await fetch("https://aitranslate.in/api/translate/file", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -27,65 +26,60 @@ export async function POST(req: Request) {
         authentication: auth,
         body: {
           fileUrl: order.image_url,
-          targetLang: "en", // English
-          convertToPdf: false,
-          skipLogoAndSeals: true // Keeps your gold border and signatures untouched
+          targetLang: "en",
+          convertToPdf: true, // We convert to PDF first because it renders text much clearer
+          skipLogoAndSeals: true,
+          // 'high_quality' mode improves background color matching
+          mode: "high_quality" 
         }
       })
     });
 
-    const jobResult = await startJob.json();
-    if (!jobResult.success) throw new Error(`Job Initiation Failed: ${jobResult.message}`);
+    const jobData = await startJob.json();
+    if (!jobData.success) throw new Error(`Job Start Failed: ${jobData.message}`);
 
-    const jobId = jobResult.body.jobId;
+    const jobId = jobData.body.jobId;
 
-    // 2. POLL FOR STATUS (/translate/status)
-    // We check every 5 seconds until the AI finishes the reconstruction.
+    // 2. POLLING (With extra time for high-quality rendering)
     let finalDownloadUrl = "";
-    for (let i = 0; i < 12; i++) { // Wait up to 60 seconds
-      await new Promise(r => setTimeout(r, 5000));
-
-      const statusRes = await fetch("https://aitranslate.in/api/translate/status", {
+    for (let i = 0; i < 15; i++) { 
+      await new Promise(r => setTimeout(r, 4000));
+      
+      const checkStatus = await fetch("https://aitranslate.in/api/translate/status", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authentication: auth, body: { jobId } })
       });
 
-      const statusData = await statusRes.json();
+      const statusData = await checkStatus.json();
       if (statusData.success && statusData.body.status === "completed") {
         finalDownloadUrl = statusData.body.downloadUrl;
         break;
       }
-      if (statusData.body.status === "error") throw new Error("AITranslate internal processing error.");
     }
 
-    if (!finalDownloadUrl) throw new Error("Translation timed out. The document is too complex.");
+    if (!finalDownloadUrl) throw new Error("Translation timed out. High-quality rendering takes longer.");
 
-    // 3. DOWNLOAD & SEND VIA RESEND
-    const imageBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
+    // 3. FETCH THE FINAL CLEAR DOCUMENT
+    const fileBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
 
+    // 4. DISPATCH
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
-      to: order.user_email,
+      to: order.user_email.toString(),
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `
-        <div style="font-family: sans-serif; padding: 20px;">
-          <h2 style="color: #003461;">Accucert Document Delivery</h2>
-          <p>Hi ${order.full_name}, your document has been reconstructed in English.</p>
-        </div>
-      `,
+      html: `<p>Your official English translation is ready. We have used a high-definition reconstruction for maximum clarity.</p>`,
       attachments: [{
-        filename: `Accucert_Translation.jpg`,
-        content: Buffer.from(imageBuffer)
-      }]
+        filename: `Accucert_Translation.pdf`, // Sending as PDF for professional clarity
+        content: Buffer.from(fileBuffer),
+      }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
-
     return NextResponse.json({ success: true, url: finalDownloadUrl });
 
   } catch (err: any) {
-    console.error("AITRANSLATE_FINAL_ERROR:", err.message);
+    console.error("AITRANSLATE_QUALITY_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
