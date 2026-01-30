@@ -14,7 +14,7 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found.');
 
-    // 1. GROK: GET THE "MAP"
+    // 1. GROK: MAP THE DESIGN (Forced English Translation)
     const grokRes = await fetch("https://api.x.ai/v1/chat/completions", {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY?.trim()}`, 'Content-Type': 'application/json' },
@@ -23,8 +23,11 @@ export async function POST(req: Request) {
         messages: [{
           role: "user",
           content: [
-            { type: "text", text: `Identify all Spanish text. Return a JSON object ONLY: 
-              {"blocks": [{"english": "Translation", "x": 10, "y": 20, "size": 24, "bold": true}]}` },
+            { type: "text", text: `Task: Translate this Spanish document into English.
+              - Identify every text block.
+              - Provide the English translation.
+              - Return ONLY a JSON object: {"blocks": [{"text": "English Translation", "x": 15, "y": 20, "size": 30}]}.
+              - Use coordinates (x,y) in percentage (0-100).` },
             { type: "image_url", image_url: { url: order.image_url } }
           ]
         }]
@@ -33,68 +36,69 @@ export async function POST(req: Request) {
 
     const grokData = await grokRes.json();
     const jsonMatch = grokData.choices[0].message.content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Grok failed to provide a translation map.");
     const blueprint = JSON.parse(jsonMatch[0]);
 
-    // 2. STABILITY AI: USE "ERASE" (NOT Search and Replace)
-    // This is the key to removing the 'smudge' effect you see in the image.
+    // 2. STABILITY AI: ERASE SPANISH
     const formData = new FormData();
     formData.append('image', await fetch(order.image_url).then(r => r.blob()));
-    formData.append('mask_prompt', "all text, handwriting, and characters"); // Specifically targets the ink
+    formData.append('mask_prompt', "spanish text, handwriting, ink");
     formData.append('output_format', 'png');
 
     const stabilityRes = await fetch("https://api.stability.ai/v2beta/stable-image/edit/erase", {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`,
-        'Accept': 'image/*' 
-      },
+      headers: { 'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`, 'Accept': 'image/*' },
       body: formData
     });
 
-    if (!stabilityRes.ok) throw new Error("Stability Erase Failed");
+    if (!stabilityRes.ok) throw new Error("Stability AI failed to clean the document.");
     const cleanImageBuffer = await stabilityRes.arrayBuffer();
 
-    // 3. SHARP: PIXEL-PERFECT STAMPING
+    // 3. SHARP: LAYER THE ENGLISH (The Fix)
     const metadata = await sharp(Buffer.from(cleanImageBuffer)).metadata();
-    const { width, height } = metadata;
+    const width = metadata.width || 1000;
+    const height = metadata.height || 1414;
 
+    // We create a very bold SVG to ensure it's visible
     const svgOverlay = `
       <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-        <style>
-          .text { font-family: 'Times New Roman', serif; fill: #2d2d2d; }
-        </style>
-        ${blueprint.blocks.map((b: any) => `
-          <text 
-            x="${(b.x * width!) / 100}" 
-            y="${(b.y * height!) / 100}" 
-            font-size="${(b.size * width!) / 1000}" 
-            font-weight="${b.bold ? 'bold' : 'normal'}"
-            class="text"
-          >
-            ${b.english}
-          </text>
-        `).join('')}
+        ${blueprint.blocks.map((b: any) => {
+          const xPos = (b.x * width) / 100;
+          const yPos = (b.y * height) / 100;
+          const fSize = (b.size * width) / 1000;
+          return `
+            <text x="${xPos}" y="${yPos}" font-family="Arial, sans-serif" font-size="${fSize}" fill="black" font-weight="bold">
+              ${b.text}
+            </text>
+          `;
+        }).join('')}
       </svg>
     `;
 
+    // Composite forces the SVG 'on top' of the cleaned image
     const finalImage = await sharp(Buffer.from(cleanImageBuffer))
-      .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
-      .jpeg({ quality: 90 })
+      .composite([{ 
+        input: Buffer.from(svgOverlay), 
+        top: 0, 
+        left: 0 
+      }])
+      .jpeg({ quality: 95 })
       .toBuffer();
 
     // 4. DISPATCH
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email.toString(),
-      subject: `Official Translation: ${order.full_name}`,
-      html: `<p>Your certified translation is ready and perfectly replicated.</p>`,
-      attachments: [{ filename: `Accucert_Document.jpg`, content: finalImage }],
+      subject: `Certified Translation: ${order.full_name}`,
+      html: `<p>Your official translation is attached as a high-resolution image.</p>`,
+      attachments: [{ filename: `Accucert_Translation.jpg`, content: finalImage }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
+    console.error("TRANSLATION_FAILURE:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
