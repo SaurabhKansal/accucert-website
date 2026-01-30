@@ -8,21 +8,32 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
-    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-    const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
+    
+    // 1. Setup Supabase
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    if (!order) throw new Error('Order not found.');
+    // 2. Fetch order data
+    const { data: order, error: dbError } = await supabase
+      .from('translations')
+      .select('*')
+      .eq('id', orderId)
+      .single();
 
-    // 1. Detect File Type
-    const isPdf = order.image_url.toLowerCase().endsWith('.pdf');
-    const isDoc = order.image_url.toLowerCase().endsWith('.docx') || order.image_url.toLowerCase().endsWith('.doc');
+    if (dbError || !order) throw new Error('Order not found in database.');
 
+    // 3. Setup AITranslate Authentication
     const auth = { 
       apiKey: process.env.AITRANSLATE_API_KEY, 
       apiSecret: process.env.AITRANSLATE_API_SECRET 
     };
 
-    // 2. INITIATE TRANSLATION
+    const fileUrl = order.image_url.toLowerCase();
+    const isDocx = fileUrl.endsWith('.docx') || fileUrl.endsWith('.doc');
+
+    // 4. INITIATE THE TRANSLATION JOB
     const startJob = await fetch("https://aitranslate.in/api/translate/file", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -31,22 +42,31 @@ export async function POST(req: Request) {
         body: {
           fileUrl: order.image_url,
           targetLang: "en",
-          // PRO TIP: Always convert to PDF for legal docs, even if the input was an image
-          convertToPdf: (isPdf || isDoc) ? true : false, 
-          skipLogoAndSeals: true 
+          // Force PDF for DOCX and high-stakes certificates for maximum clarity
+          convertToPdf: isDocx ? true : false, 
+          skipLogoAndSeals: true,
+          // 'high_quality' mode matches paper color/grain much better
+          mode: "high_quality" 
         }
       })
     });
 
     const jobData = await startJob.json();
-    if (!jobData.success) throw new Error(`Job Start Failed: ${jobData.message}`);
+    
+    // Safety check for API response
+    if (!jobData.success) {
+      throw new Error(`AITranslate Job Initiation Failed: ${jobData.message}`);
+    }
 
     const jobId = jobData.body.jobId;
 
-    // 3. POLLING FOR COMPLETION
-    let finalUrl = "";
-    for (let i = 0; i < 20; i++) { // Docs/PDFs can take longer than images
-      await new Promise(r => setTimeout(r, 5000));
+    // 5. POLLING FOR COMPLETION (Wait for reconstruction)
+    let finalDownloadUrl = "";
+    const maxAttempts = 20; // Up to 100 seconds for complex documents
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 5000)); // Wait 5 seconds between checks
+      
       const statusRes = await fetch("https://aitranslate.in/api/translate/status", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,35 +74,56 @@ export async function POST(req: Request) {
       });
 
       const statusData = await statusRes.json();
+      
       if (statusData.success && statusData.body.status === "completed") {
-        finalUrl = statusData.body.downloadUrl;
+        finalDownloadUrl = statusData.body.downloadUrl;
         break;
+      }
+
+      if (statusData.body?.status === "error") {
+        throw new Error(`AI Processing Error: ${statusData.message || 'Unknown Error'}`);
       }
     }
 
-    if (!finalUrl) throw new Error("Translation timed out. Large files need more time.");
+    if (!finalDownloadUrl) throw new Error("Translation timed out. Try again.");
 
-    // 4. PREPARE THE ATTACHMENT
-    const fileBuffer = await fetch(finalUrl).then(res => res.arrayBuffer());
+    // 6. DOWNLOAD THE RECONSTRUCTED DOCUMENT
+    const fileBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
     
-    // Set dynamic filename based on output
-    const fileExt = finalUrl.split('.').pop();
-    const fileName = `Accucert_Translation.${fileExt}`;
+    // Determine file extension for attachment
+    const fileExt = finalDownloadUrl.split('.').pop() || (isDocx ? 'pdf' : 'jpg');
+    const fileName = `Accucert_Translation_${order.full_name.replace(/\s+/g, '_')}.${fileExt}`;
 
-    // 5. DISPATCH
-    await resend.emails.send({
+    // 7. DISPATCH VIA RESEND
+    const emailResult = await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Your official English document is attached.</p>`,
-      attachments: [{ filename: fileName, content: Buffer.from(fileBuffer) }],
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+          <h2 style="color: #003461;">Certified Document Delivery</h2>
+          <p>Hi ${order.full_name},</p>
+          <p>Your official English translation and document reconstruction is complete.</p>
+          <p>Please find the certified document attached to this email.</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #666;">This is an automated delivery from Accucert.</p>
+        </div>
+      `,
+      attachments: [{
+        filename: fileName,
+        content: Buffer.from(fileBuffer),
+      }],
     });
 
+    if (emailResult.error) throw new Error(`Email failed: ${emailResult.error.message}`);
+
+    // 8. UPDATE DATABASE STATUS
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
-    return NextResponse.json({ success: true, url: finalUrl });
+
+    return NextResponse.json({ success: true, url: finalDownloadUrl });
 
   } catch (err: any) {
-    console.error("MULTIFORMAT_ERROR:", err.message);
+    console.error("ACCUCERT_FINAL_SYSTEM_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
