@@ -2,115 +2,84 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import sharp from 'sharp';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
-    const supabase = createClient(
-      (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim(), 
-      (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
-    );
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
 
-    const { data: order, error: dbErr } = await supabase
-      .from('translations')
-      .select('*')
-      .eq('id', orderId)
-      .single();
+    if (!order) throw new Error('Order not found.');
 
-    if (dbErr || !order) throw new Error('Order not found.');
-
-    const xaiKey = (process.env.XAI_API_KEY || "").trim();
-    const api2PdfKey = (process.env.API2PDF_KEY || "").trim();
-
-    // 1. CALL GROK-2-VISION-1212 (Correctly instructed to translate)
+    // 1. USE GROK TO FIND THE "MASK" AREAS
+    // We need to tell Stability AI exactly which areas to erase.
     const grokRes = await fetch("https://api.x.ai/v1/chat/completions", {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${xaiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY?.trim()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: "grok-2-vision-1212", 
+        model: "grok-2-vision-1212",
         messages: [{
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `You are a high-end legal document designer. Recreate the uploaded image exactly as an English version.
-              - STEP 1: Translate all Spanish text found in the image into professional English. 
-              - STEP 2: Use the following text as your primary translation reference: "${order.extracted_text}".
-              - STEP 3: Replicate the design (colors, font sizes, bolding, and spatial layout) using Tailwind CSS and HTML.
-              - OUTPUT: Return ONLY a <div> container with the recreation. No markdown backticks.`
+            { type: "text", text: `Analyze this image. Find every Spanish word and return a JSON map.
+              - PROMPT: "all spanish text and handwriting"
+              - BLOCKS: [{"english": "Translation", "x": 10, "y": 20, "w": 30, "h": 5, "size": 24}]` 
             },
-            { type: "image_url", image_url: { url: order.image_url.trim() } }
+            { type: "image_url", image_url: { url: order.image_url } }
           ]
-        }],
-        temperature: 0.1
+        }]
       })
     });
 
     const grokData = await grokRes.json();
-    let replicatedHtml = grokData.choices?.[0]?.message?.content || "";
-    replicatedHtml = replicatedHtml.replace(/```html|```/g, "").trim();
+    const blueprint = JSON.parse(grokData.choices[0].message.content.replace(/```json|```/g, ""));
 
-    // 2. CONSTRUCT THE PDF BODY
-    const finalHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <script src="https://cdn.tailwindcss.com"></script>
-          <style>
-            @page { margin: 0; size: A4; }
-            body { margin: 0; padding: 0; background: white; -webkit-print-color-adjust: exact !important; }
-            .pdf-page { width: 210mm; height: 297mm; position: relative; overflow: hidden; page-break-after: always; }
-          </style>
-        </head>
-        <body>
-          <div class="pdf-page" style="padding: 80px; font-family: sans-serif;">
-            <h1 style="color: #003461; margin: 0; font-size: 40px;">ACCUCERT</h1>
-            <p style="color: #666; font-weight: bold;">Certified Translation Authority</p>
-            <hr style="border: 2px solid #003461; margin: 30px 0;"/>
-            <p style="text-align: right;">Date: ${new Date().toLocaleDateString()}</p>
-            <h2>CERTIFICATE OF ACCURACY</h2>
-            <p>Accucert certifies the English translation for <b>${order.full_name}</b>.</p>
-          </div>
-          <div class="pdf-page" style="padding: 15mm;">
-            ${replicatedHtml}
-          </div>
-        </body>
-      </html>
+    // 2. STABILITY AI INPAINTING (The "Magic Eraser")
+    // This removes the text while keeping the paper texture perfectly intact.
+    const formData = new FormData();
+    formData.append('image', await fetch(order.image_url).then(r => r.blob()));
+    formData.append('prompt', "remove all text and handwriting, leave only the clean paper texture and background designs");
+    formData.append('search_prompt', "text, letters, handwriting, stamps with text");
+    formData.append('output_format', 'webp');
+
+    const stabilityRes = await fetch("https://api.stability.ai/v2beta/stable-image/edit/search-and-replace", {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`,
+        'Accept': 'image/*' 
+      },
+      body: formData
+    });
+
+    if (!stabilityRes.ok) throw new Error("Stability AI failed to clean the image.");
+    const cleanImageBuffer = await stabilityRes.arrayBuffer();
+
+    // 3. SHARP: OVERLAY THE ENGLISH
+    // Now we take the "Clean" document and stamp the English text onto the blueprint coordinates.
+    const svgOverlay = `
+      <svg width="1000" height="1414">
+        ${blueprint.blocks.map((b: any) => `
+          <text x="${b.x}%" y="${b.y + b.h}%" font-family="serif" font-size="${b.size}px" fill="black">
+            ${b.english}
+          </text>
+        `).join('')}
+      </svg>
     `;
 
-    // 3. GENERATE PDF
-    const apiRes = await fetch("https://v2.api2pdf.com/chrome/pdf/html", {
-      method: 'POST',
-      headers: { 'Authorization': api2PdfKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        html: finalHtml, 
-        inline: false, 
-        options: { printBackground: true, waitForNetworkIdle: true } 
-      })
-    });
-    
-    const apiData = await apiRes.json();
-    const pdfUrl = apiData.FileUrl || apiData.fileUrl;
-    const pdfBuffer = await fetch(pdfUrl).then(res => res.arrayBuffer());
+    const finalImage = await sharp(Buffer.from(cleanImageBuffer))
+      .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
+      .toBuffer();
 
-    // 4. DISPATCH EMAIL (Fixed TS2345 Error)
+    // 4. DISPATCH
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
-      to: order.user_email.toString(),
+      to: order.user_email,
       subject: `Official Certified Translation: ${order.full_name}`,
-      // Added mandatory 'html' field to fix TS error
-      html: `<p>Please find your certified English translation attached below.</p>`,
-      text: `Your certified translation is attached.`,
-      attachments: [{ 
-        filename: `Accucert_Translation.pdf`, 
-        // Cast as standard Buffer
-        content: Buffer.from(pdfBuffer) 
-      }],
+      html: `<p>Your document has been translated and inpainted into the original design.</p>`,
+      attachments: [{ filename: `Accucert_Translation.jpg`, content: finalImage }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
