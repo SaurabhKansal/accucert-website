@@ -23,10 +23,10 @@ export async function POST(req: Request) {
         messages: [{
           role: "user",
           content: [
-            { type: "text", text: `Analyze this image and return a JSON object ONLY. 
-              Find every Spanish text block and map it to an English translation.
+            { type: "text", text: `Analyze this document and return a JSON object ONLY. 
+              Map Spanish text to English.
               Format: {"blocks": [{"english": "Text", "x": 10, "y": 20, "size": 18, "color": "#000000"}]}
-              Important: Return ONLY the JSON. No conversational text.` },
+              Important: Coordinates (x,y) must be in PERCENTAGE (0-100).` },
             { type: "image_url", image_url: { url: order.image_url } }
           ]
         }]
@@ -34,46 +34,47 @@ export async function POST(req: Request) {
     });
 
     const grokData = await grokRes.json();
-    let rawContent = grokData.choices[0].message.content;
-
-    // --- THE "H" ERROR FIX: STRICT JSON EXTRACTION ---
-    // This finds the first { and the last } and ignores everything else.
-    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("Grok did not return a valid JSON object.");
+    const jsonMatch = grokData.choices[0].message.content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Invalid Grok Response");
     const blueprint = JSON.parse(jsonMatch[0]);
 
-    // 2. STABILITY AI: SEARCH & REPLACE (Inpainting)
-    // This removes the Spanish text and fills it with the original paper texture.
+    // 2. STABILITY AI: INPAINTING (Erase Spanish)
     const formData = new FormData();
     formData.append('image', await fetch(order.image_url).then(r => r.blob()));
-    formData.append('search_prompt', "Spanish text, handwriting, ink, letters");
-    formData.append('prompt', "clean background paper texture, blank document paper");
-    formData.append('output_format', 'webp');
+    formData.append('search_prompt', "Spanish text, handwriting, ink");
+    formData.append('prompt', "clean blank paper texture");
+    formData.append('output_format', 'png'); // PNG is safer for dimensions
 
     const stabilityRes = await fetch("https://api.stability.ai/v2beta/stable-image/edit/search-and-replace", {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`,
-        'Accept': 'image/*' 
-      },
+      headers: { 'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`, 'Accept': 'image/*' },
       body: formData
     });
 
-    if (!stabilityRes.ok) {
-        const errText = await stabilityRes.text();
-        throw new Error(`Stability AI Error: ${errText}`);
-    }
+    if (!stabilityRes.ok) throw new Error("Stability AI Cleaning Failed");
     const cleanImageBuffer = await stabilityRes.arrayBuffer();
 
-    // 3. SHARP: OVERLAY THE TRANSLATION
-    // We take the clean "blank" document and draw the English text on top.
+    // 3. SHARP: DYNAMIC DIMENSIONS FIX
+    // We get the ACTUAL width and height of the Stability AI output
+    const imageMetadata = await sharp(Buffer.from(cleanImageBuffer)).metadata();
+    const { width, height } = imageMetadata;
+
+    if (!width || !height) throw new Error("Could not read image dimensions.");
+
+    // Create SVG using the EXACT dimensions of the image
     const svgOverlay = `
-      <svg width="1000" height="1414" viewBox="0 0 100 141.4">
-        ${blueprint.blocks.map((b: any) => `
-          <text x="${b.x}" y="${b.y}" font-family="serif" font-size="${b.size / 10}" fill="${b.color || 'black'}">
-            ${b.english}
-          </text>
-        `).join('')}
+      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+        ${blueprint.blocks.map((b: any) => {
+          // Calculate pixel positions based on percentages from Grok
+          const posX = (b.x * width) / 100;
+          const posY = (b.y * height) / 100;
+          const fontSize = (b.size * width) / 1000; // Relative font scaling
+          return `
+            <text x="${posX}" y="${posY}" font-family="serif" font-size="${fontSize}" fill="${b.color || 'black'}">
+              ${b.english}
+            </text>
+          `;
+        }).join('')}
       </svg>
     `;
 
@@ -82,23 +83,20 @@ export async function POST(req: Request) {
       .jpeg()
       .toBuffer();
 
-    // 4. DISPATCH EMAIL
+    // 4. DISPATCH
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email.toString(),
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Your official translation is attached.</p>`, // Required for Resend SDK
-      attachments: [{ 
-        filename: `Accucert_Translation.jpg`, 
-        content: finalImage 
-      }],
+      html: `<p>Your official translation has been professionally inpainted.</p>`,
+      attachments: [{ filename: `Accucert_Translation.jpg`, content: finalImage }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("CRITICAL_ERROR:", err.message);
+    console.error("DIMENSION_ERROR_FIXED:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
