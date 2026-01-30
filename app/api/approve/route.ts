@@ -2,14 +2,6 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
-import { v2 as cloudinary } from 'cloudinary';
-
-// 1. Configure Cloudinary with your variables
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_NAME,
-  api_key: process.env.CLOUDINARY_KEY,
-  api_secret: process.env.CLOUDINARY_SECRET,
-});
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -24,56 +16,46 @@ export async function POST(req: Request) {
     const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
     if (!order) throw new Error('Order not found.');
 
-    // 2. THE SINGLE-STEP CLOUDINARY TRANSFORMATION
-    // This identifies the Spanish, erases it, and overlays English in one shot.
-    const uploadResult = await cloudinary.uploader.upload(order.image_url, {
-      public_id: `accucert_${orderId}`,
-      // 'adv_ocr' uses the high-power Google engine to map the document
-      ocr: "adv_ocr", 
-      // This tells Cloudinary to perform the visual replacement automatically
-      raw_convert: "google_tagging", 
-      transformation: [
-        { 
-          overlay: { 
-            font_family: "Arial", 
-            font_size: 14, 
-            text: "Official English Translation" 
-          }, 
-          gravity: "ocr_text", 
-          effect: "replace_color:white:60" // Optional: subtly clears the area under text
-        }
-      ]
+    // 1. CALL CLOUDMERSIVE DOCUMENT TRANSLATION
+    // This API specifically handles the visual translation of images/PDFs.
+    const response = await fetch("https://api.cloudmersive.com/convert/edit/pdf/pages/remove-text-and-replace-with-text", {
+      method: 'POST',
+      headers: { 
+        'Apikey': process.env.CLOUDMERSIVE_API_KEY as string,
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({
+        InputFileUrl: order.image_url,
+        // We tell it to find Spanish and replace with English
+        // Cloudmersive handles the inpainting and typesetting internally
+        SourceLanguage: "SPA",
+        TargetLanguage: "ENG"
+      })
     });
 
-    // This is the professionally reconstructed image URL
-    const finalImageUrl = uploadResult.secure_url;
+    const result = await response.json();
+    if (!result.Successful) throw new Error("Cloudmersive failed to translate.");
 
-    // 3. GET THE PROCESSED FILE
-    const imageBuffer = await fetch(finalImageUrl).then((res) => res.arrayBuffer());
+    const translatedImageUrl = result.OutputVideoUrl || result.OutputFileUrl;
+    const imageBuffer = await fetch(translatedImageUrl).then(res => res.arrayBuffer());
 
-    // 4. DISPATCH THE FINAL JPEG
+    // 2. DISPATCH
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email.toString(),
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `
-        <div style="font-family: sans-serif; padding: 20px;">
-          <h2 style="color: #003461;">Accucert Official Delivery</h2>
-          <p>Your document has been translated and reconstructed to match the original layout.</p>
-        </div>
-      `,
+      html: `<p>Your document has been professionally translated by Accucert.</p>`,
       attachments: [{
-        filename: `Accucert_Document.jpg`,
+        filename: `Accucert_Translation.jpg`,
         content: Buffer.from(imageBuffer),
       }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
-
-    return NextResponse.json({ success: true, url: finalImageUrl });
+    return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("CLOUDINARY_ALL_IN_ONE_ERROR:", err.message);
+    console.error("TRANS_FINAL_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
