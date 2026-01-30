@@ -13,12 +13,16 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found.');
 
+    // 1. Detect File Type
+    const isPdf = order.image_url.toLowerCase().endsWith('.pdf');
+    const isDoc = order.image_url.toLowerCase().endsWith('.docx') || order.image_url.toLowerCase().endsWith('.doc');
+
     const auth = { 
       apiKey: process.env.AITRANSLATE_API_KEY, 
       apiSecret: process.env.AITRANSLATE_API_SECRET 
     };
 
-    // 1. INITIATE HIGH-QUALITY TRANSLATION
+    // 2. INITIATE TRANSLATION
     const startJob = await fetch("https://aitranslate.in/api/translate/file", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -27,10 +31,9 @@ export async function POST(req: Request) {
         body: {
           fileUrl: order.image_url,
           targetLang: "en",
-          convertToPdf: true, // We convert to PDF first because it renders text much clearer
-          skipLogoAndSeals: true,
-          // 'high_quality' mode improves background color matching
-          mode: "high_quality" 
+          // PRO TIP: Always convert to PDF for legal docs, even if the input was an image
+          convertToPdf: (isPdf || isDoc) ? true : false, 
+          skipLogoAndSeals: true 
         }
       })
     });
@@ -40,46 +43,46 @@ export async function POST(req: Request) {
 
     const jobId = jobData.body.jobId;
 
-    // 2. POLLING (With extra time for high-quality rendering)
-    let finalDownloadUrl = "";
-    for (let i = 0; i < 15; i++) { 
-      await new Promise(r => setTimeout(r, 4000));
-      
-      const checkStatus = await fetch("https://aitranslate.in/api/translate/status", {
+    // 3. POLLING FOR COMPLETION
+    let finalUrl = "";
+    for (let i = 0; i < 20; i++) { // Docs/PDFs can take longer than images
+      await new Promise(r => setTimeout(r, 5000));
+      const statusRes = await fetch("https://aitranslate.in/api/translate/status", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authentication: auth, body: { jobId } })
       });
 
-      const statusData = await checkStatus.json();
+      const statusData = await statusRes.json();
       if (statusData.success && statusData.body.status === "completed") {
-        finalDownloadUrl = statusData.body.downloadUrl;
+        finalUrl = statusData.body.downloadUrl;
         break;
       }
     }
 
-    if (!finalDownloadUrl) throw new Error("Translation timed out. High-quality rendering takes longer.");
+    if (!finalUrl) throw new Error("Translation timed out. Large files need more time.");
 
-    // 3. FETCH THE FINAL CLEAR DOCUMENT
-    const fileBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
+    // 4. PREPARE THE ATTACHMENT
+    const fileBuffer = await fetch(finalUrl).then(res => res.arrayBuffer());
+    
+    // Set dynamic filename based on output
+    const fileExt = finalUrl.split('.').pop();
+    const fileName = `Accucert_Translation.${fileExt}`;
 
-    // 4. DISPATCH
+    // 5. DISPATCH
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
-      to: order.user_email.toString(),
+      to: order.user_email,
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Your official English translation is ready. We have used a high-definition reconstruction for maximum clarity.</p>`,
-      attachments: [{
-        filename: `Accucert_Translation.pdf`, // Sending as PDF for professional clarity
-        content: Buffer.from(fileBuffer),
-      }],
+      html: `<p>Your official English document is attached.</p>`,
+      attachments: [{ filename: fileName, content: Buffer.from(fileBuffer) }],
     });
 
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
-    return NextResponse.json({ success: true, url: finalDownloadUrl });
+    return NextResponse.json({ success: true, url: finalUrl });
 
   } catch (err: any) {
-    console.error("AITRANSLATE_QUALITY_ERROR:", err.message);
+    console.error("MULTIFORMAT_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
