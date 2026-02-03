@@ -13,45 +13,34 @@ export async function POST(req: Request) {
 
     if (!order) throw new Error('Order not found.');
 
-    // 1. GENERATE SECURE ACCESS FOR WAVESPEED
+    // 1. SECURE ACCESS (Signed URL for the WaveSpeed bot)
     const filePath = order.image_url.split('/documents/')[1]; 
     const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(filePath, 600);
-    if (!signedData?.signedUrl) throw new Error("Could not access file in Supabase.");
+    if (!signedData?.signedUrl) throw new Error("Supabase access blocked.");
 
-    // 2. SUBMIT TASK TO WAVESPEED V3
-    // Note: Change 'google/gemini-1.5-pro' to your preferred vision/translation model from WaveSpeed library
-    const submitRes = await fetch("https://api.wavespeed.ai/api/v3/tasks/submit", {
+    // 2. SUBMIT TO THE CORRECT ENDPOINT
+    // The "Product Not Found" error was because the model belongs in the URL path.
+    const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`,
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({
-        model: "google/gemini-1.5-pro", 
-        input: {
-          file_url: signedData.signedUrl,
-          target_lang: "en",
-          preserve_layout: true
-        }
+        image: signedData.signedUrl, // Wavespeed expects 'image' field for this model
+        target_language: "english",  // Full name, not code
+        output_format: "jpeg"
       })
     });
 
-    // --- ROBUST JSON PARSER (Fixes "Position 4" Error) ---
-    const rawText = await submitRes.text();
-    let submitData;
-    try {
-      // Extracts the first valid JSON object {} even if followed by other characters
-      const match = rawText.match(/\{[\s\S]*?\}/);
-      if (!match) throw new Error("Invalid API Response Format");
-      submitData = JSON.parse(match[0]);
-    } catch (e) {
-      throw new Error(`Wavespeed parsing failed. Raw response: ${rawText.substring(0, 50)}`);
+    const submitData = await submitRes.json();
+    if (!submitRes.ok || submitData.code !== 200) {
+      throw new Error(`WaveSpeed AI Rejection: ${submitData.message || "Invalid Model/Endpoint"}`);
     }
 
-    if (!submitData.success) throw new Error(`WaveSpeed Rejection: ${submitData.message}`);
-    const taskId = submitData.data.task_id;
+    const taskId = submitData.data.id;
 
-    // 3. POLL FOR RESULT
+    // 3. POLLING (Wait for the result)
     let finalDownloadUrl = "";
     for (let i = 0; i < 20; i++) {
       await new Promise(r => setTimeout(r, 6000));
@@ -61,25 +50,26 @@ export async function POST(req: Request) {
       });
 
       const statusData = await statusRes.json();
+      
       if (statusData.data?.status === "completed") {
-        finalDownloadUrl = statusData.data.output_url;
+        finalDownloadUrl = statusData.data.outputs[0]; // Outputs is an array
         break;
       }
-      if (statusData.data?.status === "failed") throw new Error("WaveSpeed AI failed to process file.");
+      if (statusData.data?.status === "failed") throw new Error("WaveSpeed processing failed.");
     }
 
     if (!finalDownloadUrl) throw new Error("Translation timed out.");
 
-    // 4. DISPATCH VIA RESEND
+    // 4. DISPATCH
     const fileBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
 
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Hi ${order.full_name}, your official English document is ready.</p>`,
+      html: `<p>Your reconstructed English document is ready.</p>`,
       attachments: [{
-        filename: `Accucert_Translation.pdf`,
+        filename: `Accucert_Translation.jpg`,
         content: Buffer.from(fileBuffer),
       }],
     });
@@ -88,7 +78,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("WAVESPEED_DISPATCH_ERROR:", err.message);
+    console.error("WAVESPEED_V3_FAILURE:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
