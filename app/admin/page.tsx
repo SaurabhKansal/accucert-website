@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import dynamic from "next/dynamic";
 import 'react-quill-new/dist/quill.snow.css';
 
+// Dynamically import Quill to prevent SSR issues in Next.js
 const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
 const supabase = createClient(
@@ -23,7 +24,7 @@ export default function AdminDashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
 
-  // Status-driven states
+  // Status-driven states for the modal
   const [aiStatus, setAiStatus] = useState("idle");
   const [aiResultUrl, setAiResultUrl] = useState("");
 
@@ -37,6 +38,7 @@ export default function AdminDashboard() {
     ],
   }), []);
 
+  // Main table list subscription
   useEffect(() => {
     fetchRequests();
     const channel = supabase
@@ -48,20 +50,28 @@ export default function AdminDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // Modal-specific real-time subscription (Crucial for auto-fetching preview)
   useEffect(() => {
     if (!selectedReq) return;
+    
     const sub = supabase
-      .channel(`req-${selectedReq.id}`)
+      .channel(`realtime-order-${selectedReq.id}`)
       .on('postgres_changes', { 
         event: 'UPDATE', 
         schema: 'public', 
         table: 'translations', 
         filter: `id=eq.${selectedReq.id}` 
       }, (payload) => {
+        console.log("📡 Real-time Engine Update:", payload.new.processing_status);
+        
+        // This is where the magic happens: state updates automatically
         setAiStatus(payload.new.processing_status);
-        setAiResultUrl(payload.new.translated_url);
+        if (payload.new.translated_url) {
+          setAiResultUrl(payload.new.translated_url);
+        }
       })
       .subscribe();
+
     return () => { supabase.removeChannel(sub); };
   }, [selectedReq]);
 
@@ -79,26 +89,41 @@ export default function AdminDashboard() {
     setShowLivePreview(false);
   };
 
+  /**
+   * TRIGGER AI RECONSTRUCTION
+   * Updates local state immediately to avoid 'idle' lag
+   */
   async function handleTriggerAI() {
     if (!selectedReq) return;
+    
+    // UI Feedback: Immediately start the orange pulse
     setIsProcessing(true);
+    setAiStatus("processing"); 
+
     try {
       const res = await fetch("/api/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: selectedReq.id }),
       });
+
       if (!res.ok && aiStatus === 'idle') {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Initialization failed");
+        throw new Error(errData.error || "Network error");
       }
     } catch (err: any) {
-      if (aiStatus === 'idle') alert("AI_START_ERROR: " + err.message);
+      if (aiStatus === 'idle') {
+        setAiStatus("idle");
+        alert("CRITICAL_START_ERROR: " + err.message);
+      }
     } finally {
       setIsProcessing(false);
     }
   }
 
+  /**
+   * DISPATCH FINAL EMAIL
+   */
   async function handleDispatchEmail() {
     if (!selectedReq || !aiResultUrl) return;
     setIsDispatching(true);
@@ -127,7 +152,6 @@ export default function AdminDashboard() {
     return matchesSearch && matchesStatus;
   });
 
-  // Helper to map DB status to UI labels
   const getStatusLabel = (status: string) => {
     switch(status) {
       case 'ready': return 'Reconstructed';
@@ -210,22 +234,35 @@ export default function AdminDashboard() {
             </div>
 
             <div className="flex-1 overflow-hidden grid md:grid-cols-2">
+              {/* LEFT SIDE: AUTO-FETCH PREVIEW */}
               <div className="bg-slate-900 p-8 overflow-auto space-y-10 custom-scrollbar">
                 <div className="space-y-3">
                   <p className="text-white text-[9px] font-black uppercase tracking-[0.3em] opacity-30">Source_Input</p>
                   <img src={selectedReq.image_url} className="w-full rounded shadow-2xl border-4 border-white/5" />
                 </div>
-                {aiResultUrl && (
+                
+                {aiResultUrl ? (
                   <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-700">
                     <p className="text-blue-400 text-[9px] font-black uppercase tracking-[0.3em]">AI_Reconstruction_Result</p>
-                    <img src={aiResultUrl} className="w-full rounded shadow-2xl border-4 border-blue-500/20" />
+                    <img 
+                      src={aiResultUrl} 
+                      className="w-full rounded shadow-2xl border-4 border-blue-500/20" 
+                      alt="Preview Ready"
+                    />
+                  </div>
+                ) : (
+                  <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-[3rem]">
+                     <div className={`w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full ${aiStatus === 'processing' ? 'animate-spin' : ''} mb-4`} />
+                     <p className="text-white/20 text-[10px] font-black uppercase tracking-widest text-center">
+                        {aiStatus === 'processing' ? 'AI is Re-drawing pixels...' : 'Awaiting Engine Trigger...'}
+                     </p>
                   </div>
                 )}
               </div>
 
               <div className="p-10 flex flex-col bg-white overflow-hidden">
                 <div className="mb-8 p-10 bg-slate-900 rounded-[3rem] shadow-2xl flex flex-col items-center justify-center text-center">
-                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.4em] mb-4">WaveSpeed Engine Status</p>
+                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.4em] mb-4">Engine Engine Status</p>
                    
                    <div className="flex items-center gap-4 mb-6">
                       <div className={`w-4 h-4 rounded-full ${aiStatus === 'ready' ? 'bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.8)]' : aiStatus === 'idle' ? 'bg-white/20' : 'bg-orange-500 animate-ping'}`} />
@@ -238,14 +275,14 @@ export default function AdminDashboard() {
                      <button 
                        onClick={handleTriggerAI}
                        disabled={isProcessing}
-                       className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all"
+                       className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/20"
                      >
                        {isProcessing ? "INITIALIZING..." : "START_RECONSTRUCTION"}
                      </button>
                    ) : aiStatus === 'ready' ? (
                       <p className="text-green-400 text-[10px] font-black uppercase tracking-widest">System_Ready: Verification Required</p>
                    ) : (
-                      <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em]">The AI is currently re-drawing the pixels...</p>
+                      <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em]">The AI is currently working in the background...</p>
                    )}
                 </div>
 
@@ -279,9 +316,12 @@ export default function AdminDashboard() {
       )}
       
       <style jsx global>{`
-        .ql-container { border: none !important; font-family: serif; font-size: 18px; }
+        .ql-container { border: none !important; font-family: 'Times New Roman', serif !important; font-size: 18px; }
         .ql-toolbar { border: none !important; background: white; border-radius: 2rem 2rem 0 0; padding: 20px !important; }
         .ql-editor { padding: 50px !important; line-height: 1.8; color: #1e293b; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
       `}</style>
     </div>
   );
