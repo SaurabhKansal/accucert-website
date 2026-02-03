@@ -8,87 +8,119 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
-    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-    const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
+    
+    // 1. INITIALIZE SUPABASE
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    if (!order) throw new Error('Order not found.');
+    // 2. FETCH ORDER DATA
+    const { data: order, error: dbError } = await supabase
+      .from('translations')
+      .select('*')
+      .eq('id', orderId)
+      .single();
 
-    // 1. SECURE FILE ACCESS
+    if (dbError || !order) throw new Error('Order not found in database.');
+
+    // 3. GENERATE SIGNED URL FOR WAVESPEED ACCESS
     const filePath = order.image_url.split('/documents/')[1]; 
-    const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(filePath, 600);
-    if (!signedData?.signedUrl) throw new Error("Supabase bucket access denied.");
+    const { data: signedData, error: signedError } = await supabase
+      .storage
+      .from('documents')
+      .createSignedUrl(filePath, 300); // 5 minute window
 
-    // 2. SUBMIT TO WAVESPEED V3
-    // Note: We use the exact model path in the URL to avoid 'Product Not Found'
-    const submitRes = await fetch("https://api.wavespeed.ai/api/v3/google/gemini-1.5-pro", {
+    if (signedError || !signedData?.signedUrl) {
+      throw new Error(`Accessibility Error: ${signedError?.message || "Could not sign URL"}`);
+    }
+
+    // 4. SUBMIT TASK TO WAVESPEED V3
+    // Endpoint is model-specific as per documentation
+    const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`,
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({
-        input: {
-          image: signedData.signedUrl,
-          prompt: "Translate all Spanish text in this image to English. Keep the original background and layout exactly the same. Output only the translated image.",
-          target_lang: "English"
-        }
+        image: signedData.signedUrl,
+        target_language: "english",
+        output_format: "jpeg",
+        enable_sync_mode: false,
+        enable_base64_output: false
       })
     });
 
-    // --- ROBUST PARSER (Fixes Position 4 Error) ---
-    const rawText = await submitRes.text();
-    let submitData;
-    try {
-      // This Regex finds the first valid {...} block and ignores "data: " or other noise
-      const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
-      if (!jsonMatch) throw new Error("No valid JSON found in response.");
-      submitData = JSON.parse(jsonMatch[0]);
-    } catch (e) {
-      console.error("RAW_WAVESPEED_RESPONSE:", rawText);
-      throw new Error("Failed to parse WaveSpeed response. See Vercel logs.");
+    const submitData = await submitRes.json();
+    if (!submitRes.ok || !submitData.id) {
+      throw new Error(`WaveSpeed Submission Failed: ${submitData.message || "Unknown error"}`);
     }
-    // ----------------------------------------------
 
-    if (!submitData.success) throw new Error(`WaveSpeed Rejection: ${submitData.message}`);
-    const taskId = submitData.data.task_id || submitData.data.id;
+    const taskId = submitData.id;
 
-    // 3. POLLING FOR COMPLETION
-    let finalUrl = "";
-    for (let i = 0; i < 20; i++) {
-      await new Promise(r => setTimeout(r, 6000));
-      const statusRes = await fetch(`https://api.wavespeed.ai/api/v3/tasks/result/${taskId}`, {
+    // 5. POLLING LOOP (Check Status)
+    let finalDownloadUrl = "";
+    const maxAttempts = 20; 
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 5000)); // Wait 5 seconds
+
+      // Check Status Endpoint
+      const statusRes = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}`, {
         headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
       });
 
       const statusData = await statusRes.json();
-      if (statusData.data?.status === "completed") {
-        // WaveSpeed often puts the final link in 'outputs' array or 'output_url'
-        finalUrl = statusData.data.output_url || statusData.data.outputs?.[0];
+      const currentStatus = statusData.status;
+
+      if (currentStatus === "completed") {
+        // Fetch Result Endpoint (New requirement in V3)
+        const resultRes = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}/result`, {
+          headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
+        });
+        const resultData = await resultRes.json();
+        
+        // Output is returned as an array in the result schema
+        finalDownloadUrl = resultData.outputs?.[0];
         break;
       }
-      if (statusData.data?.status === "failed") throw new Error("WaveSpeed processing failed.");
+
+      if (currentStatus === "failed") {
+        throw new Error(`WaveSpeed Processing Failed: ${statusData.error || "Internal AI error"}`);
+      }
     }
 
-    if (!finalUrl) throw new Error("Translation timed out.");
+    if (!finalDownloadUrl) throw new Error("Translation timed out during polling.");
 
-    // 4. DOWNLOAD & DISPATCH
-    const fileBuffer = await fetch(finalUrl).then(res => res.arrayBuffer());
+    // 6. DOWNLOAD TRANSLATED FILE
+    const fileBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
+
+    // 7. DISPATCH VIA RESEND
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
-      subject: `Official Certified Translation: ${order.full_name}`,
-      html: `<p>Your reconstructed document is ready.</p>`,
+      subject: `Certified Translation Delivery: ${order.full_name}`,
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+          <h2 style="color: #003461;">Certified Document Delivery</h2>
+          <p>Hi ${order.full_name},</p>
+          <p>Your document has been professionally reconstructed and translated into English using our high-fidelity AI engine.</p>
+        </div>
+      `,
       attachments: [{
-        filename: `Accucert_Translation.pdf`,
+        filename: `Accucert_Translation_${orderId}.jpg`,
         content: Buffer.from(fileBuffer),
       }],
     });
 
+    // 8. UPDATE DATABASE
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
+
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("WAVESPEED_V3_FAILURE:", err.message);
+    console.error("WAVESPEED_V3_CRITICAL_FAILURE:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
