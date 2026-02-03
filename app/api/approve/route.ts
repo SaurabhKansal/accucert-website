@@ -3,23 +3,30 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req: Request) {
-  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!, 
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  
   let currentOrderId: string = "";
 
   try {
     const body = await req.json();
     currentOrderId = body.orderId;
 
+    if (!currentOrderId) throw new Error("Order ID is missing");
+
     const { data: order } = await supabase.from('translations').select('*').eq('id', currentOrderId).single();
     if (!order) throw new Error('Order not found.');
 
-    // 1. Mark status as processing (No percentage needed)
+    // 1. Initial Status Update (Sets the dashboard pulse to Orange)
     await supabase.from('translations').update({ processing_status: 'processing' }).eq('id', currentOrderId);
 
-    // 2. Storage & WaveSpeed Submission
+    // 2. Storage Signed URL
     const filePath = order.image_url.includes('/documents/') ? order.image_url.split('/documents/')[1] : order.image_url.split('/').pop(); 
     const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(filePath!, 900);
 
+    // 3. Submit Task (V3 Path: wavespeed-ai/image-translator)
     const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
       method: 'POST',
       headers: { 
@@ -33,46 +40,66 @@ export async function POST(req: Request) {
       })
     });
 
-    const rawText = await submitRes.text();
+    const submitJson = await submitRes.json();
     
-    // 3. SILENT SUCCESS: We extract the ID only to start the poller.
-    // If extraction fails but the request was 200, we don't crash.
-    const taskIdMatch = rawText.match(/"id"\s*:\s*"([^"]+)"/);
-    const taskId = taskIdMatch ? taskIdMatch[1] : null;
+    // WaveSpeed V3 nests the Task ID in data.id
+    const taskId = submitJson.data?.id;
 
     if (taskId) {
-      pollForImage(taskId, currentOrderId, supabase);
+      // Hand off to the polling function using the V3 predictions endpoint
+      pollWaveSpeedV3(taskId, currentOrderId, supabase);
     }
 
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("SILENT_START_ERROR:", err.message);
-    return NextResponse.json({ success: true }); // We return success anyway so the UI stays open
+    console.error("V3_SUBMIT_ERROR:", err.message);
+    
+    // Safety check to reset status if submission fails
+    if (currentOrderId) {
+      await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', currentOrderId);
+    }
+    
+    return NextResponse.json({ success: true }); // Return true anyway to prevent UI alert popups
   }
 }
 
-async function pollForImage(taskId: string, orderId: string, supabase: any) {
-  for (let i = 0; i < 40; i++) {
+/**
+ * Polling Logic based on V3 Documentation
+ */
+async function pollWaveSpeedV3(taskId: string, orderId: string, supabase: any) {
+  for (let i = 0; i < 50; i++) {
     await new Promise(r => setTimeout(r, 8000)); // Check every 8 seconds
 
     try {
-      const res = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}/result`, {
+      // GET https://api.wavespeed.ai/api/v3/predictions/TASK_ID
+      const res = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}`, {
         headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
       });
-      const data = await res.json();
       
-      const status = data.status || data.data?.status;
-      const url = data.outputs?.[0] || data.data?.outputs?.[0];
+      const responseJson = await res.json();
+      const status = responseJson.data?.status;
+      const outputs = responseJson.data?.outputs;
 
-      if (status === "completed" && url) {
-        // THIS IS THE MOMENT: We save the URL and the dashboard will show it!
+      if (status === "completed" && outputs && outputs.length > 0) {
+        const finalUrl = outputs[0];
+
+        // This update triggers the Admin Dashboard preview and enables the DISPATCH button
         await supabase.from('translations').update({ 
-          translated_url: url,
+          translated_url: finalUrl,
           processing_status: 'ready' 
         }).eq('id', orderId);
+        
+        return; 
+      }
+
+      if (status === "failed") {
+        await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', orderId);
         return;
       }
-    } catch (e) { /* keep trying */ }
+      
+    } catch (e) {
+      console.error("V3_POLL_ITERATION_ERROR:", e);
+    }
   }
 }

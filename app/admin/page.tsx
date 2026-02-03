@@ -5,7 +5,6 @@ import { createClient } from "@supabase/supabase-js";
 import dynamic from "next/dynamic";
 import 'react-quill-new/dist/quill.snow.css';
 
-// Dynamically import Quill to prevent SSR issues in Next.js
 const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
 const supabase = createClient(
@@ -24,9 +23,8 @@ export default function AdminDashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
 
-  // Real-time progress states for the modal
+  // Status-driven states
   const [aiStatus, setAiStatus] = useState("idle");
-  const [aiPercent, setAiPercent] = useState(0);
   const [aiResultUrl, setAiResultUrl] = useState("");
 
   const modules = useMemo(() => ({
@@ -41,22 +39,17 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchRequests();
-    
-    // Subscribe to ALL changes for real-time list updates in the table
     const channel = supabase
       .channel('schema-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'translations' }, () => {
         fetchRequests();
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Subscribe to specific selected request updates for the modal progress bar
   useEffect(() => {
     if (!selectedReq) return;
-    
     const sub = supabase
       .channel(`req-${selectedReq.id}`)
       .on('postgres_changes', { 
@@ -66,11 +59,9 @@ export default function AdminDashboard() {
         filter: `id=eq.${selectedReq.id}` 
       }, (payload) => {
         setAiStatus(payload.new.processing_status);
-        setAiPercent(payload.new.processing_percentage);
         setAiResultUrl(payload.new.translated_url);
       })
       .subscribe();
-
     return () => { supabase.removeChannel(sub); };
   }, [selectedReq]);
 
@@ -84,46 +75,30 @@ export default function AdminDashboard() {
     setSelectedReq(req);
     setEditText(req.extracted_text || "");
     setAiStatus(req.processing_status || "idle");
-    setAiPercent(req.processing_percentage || 0);
     setAiResultUrl(req.translated_url || "");
     setShowLivePreview(false);
   };
 
-  /**
-   * TRIGGER AI RECONSTRUCTION
-   * This version is optimized to ignore timeouts if the DB status has changed.
-   */
   async function handleTriggerAI() {
     if (!selectedReq) return;
     setIsProcessing(true);
-    
     try {
       const res = await fetch("/api/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: selectedReq.id }),
       });
-
-      // We only alert an error if the request failed AND the database status is still idle.
-      // This prevents the "Ghost Error" when the background process actually started.
       if (!res.ok && aiStatus === 'idle') {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "System timed out during initialization.");
+        throw new Error(errData.error || "Initialization failed");
       }
-      
-      console.log("🚀 System: AI Process confirmed via background channel.");
     } catch (err: any) {
-      if (aiStatus === 'idle') {
-        alert("CRITICAL_RECONSTRUCTION_ERROR: " + err.message);
-      }
+      if (aiStatus === 'idle') alert("AI_START_ERROR: " + err.message);
     } finally {
       setIsProcessing(false);
     }
   }
 
-  /**
-   * DISPATCH FINAL EMAIL
-   */
   async function handleDispatchEmail() {
     if (!selectedReq || !aiResultUrl) return;
     setIsDispatching(true);
@@ -134,7 +109,7 @@ export default function AdminDashboard() {
         body: JSON.stringify({ orderId: selectedReq.id }),
       });
       if (res.ok) {
-        alert("🎉 DISPATCHED: The certified translation has been sent to the client.");
+        alert("🚀 DISPATCHED: Official Translation sent to client.");
         setSelectedReq(null);
         fetchRequests();
       }
@@ -152,7 +127,18 @@ export default function AdminDashboard() {
     return matchesSearch && matchesStatus;
   });
 
-  if (loading) return <div className="p-20 text-center font-bold animate-pulse">VAULT_ACCESS_IN_PROGRESS...</div>;
+  // Helper to map DB status to UI labels
+  const getStatusLabel = (status: string) => {
+    switch(status) {
+      case 'ready': return 'Reconstructed';
+      case 'processing': return 'In Progress';
+      case 'created': return 'Task Queued';
+      case 'failed': return 'Failed';
+      default: return 'Idle';
+    }
+  };
+
+  if (loading) return <div className="p-20 text-center font-bold">VAULT_ACCESS_IN_PROGRESS...</div>;
 
   return (
     <div className="min-h-screen bg-slate-100 p-8 text-slate-900 font-sans">
@@ -162,22 +148,19 @@ export default function AdminDashboard() {
             <h1 className="text-4xl font-black tracking-tighter italic uppercase">Vault_Control</h1>
             <p className="text-[10px] font-bold text-slate-400 tracking-[0.2em] uppercase">Accucert Global Management</p>
           </div>
-          
-          <div className="flex gap-4">
-            <input 
-              type="text" placeholder="Search records..." 
-              className="p-4 rounded-2xl text-xs w-80 bg-white shadow-sm outline-none focus:ring-2 ring-blue-500 transition-all"
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <input 
+            type="text" placeholder="Search records..." 
+            className="p-4 rounded-2xl text-xs w-80 bg-white shadow-sm outline-none"
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </header>
 
         <div className="bg-white rounded-[3rem] shadow-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-left">
-            <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b tracking-widest">
+            <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b">
               <tr>
                 <th className="p-8">Order & Language</th>
-                <th className="p-8">AI Progress</th>
+                <th className="p-8">Engine Status</th>
                 <th className="p-8">Delivery</th>
                 <th className="p-8 text-right">Action</th>
               </tr>
@@ -191,9 +174,9 @@ export default function AdminDashboard() {
                   </td>
                   <td className="p-8">
                     <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${req.processing_status === 'ready' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-orange-400 animate-pulse'}`} />
+                      <div className={`w-2 h-2 rounded-full ${req.processing_status === 'ready' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : req.processing_status === 'idle' ? 'bg-slate-300' : 'bg-orange-400 animate-pulse'}`} />
                       <span className="text-[10px] font-black uppercase text-slate-500">
-                        {req.processing_status === 'ready' ? 'RECONSTRUCTED' : `${req.processing_percentage || 0}%`}
+                        {getStatusLabel(req.processing_status)}
                       </span>
                     </div>
                   </td>
@@ -203,7 +186,7 @@ export default function AdminDashboard() {
                     </span>
                   </td>
                   <td className="p-8 text-right">
-                    <button onClick={() => openReview(req)} className="bg-slate-900 text-white px-8 py-3 rounded-2xl text-[10px] font-black tracking-widest hover:bg-blue-600 transition-all shadow-lg">
+                    <button onClick={() => openReview(req)} className="bg-slate-900 text-white px-8 py-3 rounded-2xl text-[10px] font-black tracking-widest hover:bg-blue-600 transition-all">
                       OPEN_VAULT
                     </button>
                   </td>
@@ -223,16 +206,15 @@ export default function AdminDashboard() {
                 <h2 className="text-2xl font-black italic uppercase tracking-tight">Certification_Control</h2>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Order_Ref: {selectedReq.id}</p>
               </div>
-              <button onClick={() => setSelectedReq(null)} className="w-12 h-12 rounded-full border bg-white shadow-sm flex items-center justify-center font-bold hover:bg-red-500 hover:text-white transition-all transform hover:rotate-90">✕</button>
+              <button onClick={() => setSelectedReq(null)} className="w-12 h-12 rounded-full border bg-white flex items-center justify-center font-bold hover:bg-red-500 hover:text-white transition-all transform hover:rotate-90">✕</button>
             </div>
 
             <div className="flex-1 overflow-hidden grid md:grid-cols-2">
               <div className="bg-slate-900 p-8 overflow-auto space-y-10 custom-scrollbar">
                 <div className="space-y-3">
-                  <p className="text-white text-[9px] font-black uppercase tracking-[0.3em] opacity-30">Source_Document</p>
+                  <p className="text-white text-[9px] font-black uppercase tracking-[0.3em] opacity-30">Source_Input</p>
                   <img src={selectedReq.image_url} className="w-full rounded shadow-2xl border-4 border-white/5" />
                 </div>
-                
                 {aiResultUrl && (
                   <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-700">
                     <p className="text-blue-400 text-[9px] font-black uppercase tracking-[0.3em]">AI_Reconstruction_Result</p>
@@ -242,29 +224,28 @@ export default function AdminDashboard() {
               </div>
 
               <div className="p-10 flex flex-col bg-white overflow-hidden">
-                <div className="mb-8 p-8 bg-slate-900 rounded-[2.5rem] shadow-2xl">
-                   <div className="flex justify-between items-center mb-4">
-                      <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">AI_Processing_Engine</p>
-                      <span className="text-lg font-black text-white">{aiPercent}%</span>
+                <div className="mb-8 p-10 bg-slate-900 rounded-[3rem] shadow-2xl flex flex-col items-center justify-center text-center">
+                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.4em] mb-4">WaveSpeed Engine Status</p>
+                   
+                   <div className="flex items-center gap-4 mb-6">
+                      <div className={`w-4 h-4 rounded-full ${aiStatus === 'ready' ? 'bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.8)]' : aiStatus === 'idle' ? 'bg-white/20' : 'bg-orange-500 animate-ping'}`} />
+                      <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">
+                        {getStatusLabel(aiStatus)}
+                      </h3>
                    </div>
-                   <div className="w-full h-4 bg-white/10 rounded-full overflow-hidden mb-6">
-                      <div 
-                        className={`h-full transition-all duration-700 ease-out ${aiStatus === 'ready' ? 'bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' : 'bg-blue-500 animate-pulse'}`} 
-                        style={{ width: `${aiPercent}%` }}
-                      />
-                   </div>
+
                    {aiStatus === 'idle' || aiStatus === 'failed' ? (
                      <button 
                        onClick={handleTriggerAI}
                        disabled={isProcessing}
-                       className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/20"
+                       className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all"
                      >
-                       {isProcessing ? "INITIALIZING_SYSTEM..." : "START_AI_RECONSTRUCTION"}
+                       {isProcessing ? "INITIALIZING..." : "START_RECONSTRUCTION"}
                      </button>
+                   ) : aiStatus === 'ready' ? (
+                      <p className="text-green-400 text-[10px] font-black uppercase tracking-widest">System_Ready: Verification Required</p>
                    ) : (
-                     <p className="text-[10px] font-bold text-center text-white/60 tracking-widest uppercase">
-                       {aiStatus === 'ready' ? 'System_Ready: Inspection Required' : 'AI_currently_re-drawing_pixels...'}
-                     </p>
+                      <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em]">The AI is currently re-drawing the pixels...</p>
                    )}
                 </div>
 
@@ -275,23 +256,21 @@ export default function AdminDashboard() {
             </div>
 
             <div className="p-10 border-t bg-slate-50 flex justify-between items-center">
-                <div className="flex gap-12">
+                <div className="flex gap-12 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                     <div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Verification</p>
-                        <p className={`font-bold text-sm ${selectedReq.payment_status === 'paid' ? 'text-green-600' : 'text-red-500'}`}>
-                          {selectedReq.payment_status === 'paid' ? 'PAYMENT_VERIFIED' : 'UNPAID'}
-                        </p>
+                        <p>Payment_Auth</p>
+                        <p className={`text-sm mt-1 ${selectedReq.payment_status === 'paid' ? 'text-green-600' : 'text-red-500'}`}>{selectedReq.payment_status === 'paid' ? 'VERIFIED' : 'UNPAID'}</p>
                     </div>
                 </div>
                 
                 <div className="flex gap-6">
-                  <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 px-6 tracking-widest hover:text-slate-900">CLOSE_VAULT</button>
+                  <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 tracking-widest">CLOSE_VAULT</button>
                   <button 
                     onClick={handleDispatchEmail} 
                     disabled={aiStatus !== 'ready' || isDispatching} 
-                    className="bg-slate-900 text-white px-24 py-6 rounded-[2rem] font-black text-xs hover:bg-blue-600 hover:shadow-2xl hover:shadow-blue-200 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="bg-slate-900 text-white px-24 py-6 rounded-[2rem] font-black text-xs hover:bg-blue-600 transition-all disabled:opacity-30"
                   >
-                    {isDispatching ? "DISPATCHING_ENCRYPTED_EMAIL..." : "DISPATCH_TO_CLIENT"}
+                    {isDispatching ? "DISPATCHING..." : "SIGN & DISPATCH"}
                   </button>
                 </div>
             </div>
@@ -300,12 +279,9 @@ export default function AdminDashboard() {
       )}
       
       <style jsx global>{`
-        .ql-container { border: none !important; font-family: 'Times New Roman', serif !important; font-size: 18px; }
-        .ql-toolbar { border: none !important; background: white; border-radius: 2rem 2rem 0 0; border-bottom: 1px solid #f1f5f9 !important; padding: 20px !important; }
+        .ql-container { border: none !important; font-family: serif; font-size: 18px; }
+        .ql-toolbar { border: none !important; background: white; border-radius: 2rem 2rem 0 0; padding: 20px !important; }
         .ql-editor { padding: 50px !important; line-height: 1.8; color: #1e293b; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
       `}</style>
     </div>
   );
