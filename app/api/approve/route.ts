@@ -8,84 +8,87 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
-    
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
 
-    const { data: order, error: dbError } = await supabase
-      .from('translations')
-      .select('*')
-      .eq('id', orderId)
-      .single();
-
-    if (dbError || !order) throw new Error('Order not found in database.');
+    if (!order) throw new Error('Order not found.');
 
     // 1. GENERATE SECURE ACCESS FOR WAVESPEED
     const filePath = order.image_url.split('/documents/')[1]; 
-    const { data: signedData, error: signedError } = await supabase
-      .storage
-      .from('documents')
-      .createSignedUrl(filePath, 300);
+    const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(filePath, 600);
+    if (!signedData?.signedUrl) throw new Error("Could not access file in Supabase.");
 
-    if (signedError || !signedData?.signedUrl) {
-      throw new Error(`Accessibility Error: ${signedError?.message}`);
-    }
-
-    // 2. CALL WAVESPEED AI API
-    // Wavespeed typically uses a direct POST to their translation endpoint
-    const wavespeedRes = await fetch("https://api.wavespeed.ai/v1/translate/document", {
+    // 2. SUBMIT TASK TO WAVESPEED V3
+    // Note: Change 'google/gemini-1.5-pro' to your preferred vision/translation model from WaveSpeed library
+    const submitRes = await fetch("https://api.wavespeed.ai/api/v3/tasks/submit", {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`,
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({
-        documentUrl: signedData.signedUrl,
-        sourceLanguage: "auto",
-        targetLanguage: "en",
-        preserveLayout: true,
-        outputFormat: "pdf"
+        model: "google/gemini-1.5-pro", 
+        input: {
+          file_url: signedData.signedUrl,
+          target_lang: "en",
+          preserve_layout: true
+        }
       })
     });
 
-    const waveData = await wavespeedRes.json();
-    
-    // Safety check for Wavespeed's response structure
-    if (!wavespeedRes.ok || !waveData.success) {
-      throw new Error(`Wavespeed Error: ${waveData.message || "Translation failed"}`);
+    // --- ROBUST JSON PARSER (Fixes "Position 4" Error) ---
+    const rawText = await submitRes.text();
+    let submitData;
+    try {
+      // Extracts the first valid JSON object {} even if followed by other characters
+      const match = rawText.match(/\{[\s\S]*?\}/);
+      if (!match) throw new Error("Invalid API Response Format");
+      submitData = JSON.parse(match[0]);
+    } catch (e) {
+      throw new Error(`Wavespeed parsing failed. Raw response: ${rawText.substring(0, 50)}`);
     }
 
-    // 3. WAVESPEED DOWNLOAD (Polling or Direct)
-    // Most high-end APIs like Wavespeed provide a status URL or a direct link
-    const translatedFileUrl = waveData.translatedDocumentUrl;
-    const fileBuffer = await fetch(translatedFileUrl).then(res => res.arrayBuffer());
+    if (!submitData.success) throw new Error(`WaveSpeed Rejection: ${submitData.message}`);
+    const taskId = submitData.data.task_id;
+
+    // 3. POLL FOR RESULT
+    let finalDownloadUrl = "";
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 6000));
+      
+      const statusRes = await fetch(`https://api.wavespeed.ai/api/v3/tasks/result/${taskId}`, {
+        headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
+      });
+
+      const statusData = await statusRes.json();
+      if (statusData.data?.status === "completed") {
+        finalDownloadUrl = statusData.data.output_url;
+        break;
+      }
+      if (statusData.data?.status === "failed") throw new Error("WaveSpeed AI failed to process file.");
+    }
+
+    if (!finalDownloadUrl) throw new Error("Translation timed out.");
 
     // 4. DISPATCH VIA RESEND
+    const fileBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
+
     await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
       subject: `Official Certified Translation: ${order.full_name}`,
-      html: `
-        <div style="font-family: sans-serif; padding: 20px;">
-          <h2 style="color: #003461;">Certified Delivery</h2>
-          <p>Hi ${order.full_name}, your document has been translated via Wavespeed AI and verified.</p>
-        </div>
-      `,
+      html: `<p>Hi ${order.full_name}, your official English document is ready.</p>`,
       attachments: [{
-        filename: `Accucert_Translation_${orderId}.pdf`,
+        filename: `Accucert_Translation.pdf`,
         content: Buffer.from(fileBuffer),
       }],
     });
 
-    // 5. UPDATE DATABASE
     await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
-
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("WAVESPEED_SYSTEM_FAILURE:", err.message);
+    console.error("WAVESPEED_DISPATCH_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
