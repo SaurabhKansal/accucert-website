@@ -1,8 +1,9 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import CloudConvert from 'cloudconvert';
 
+// Use require to bypass the TypeScript module error you had earlier
+const CloudConvert = require('cloudconvert');
 const cloudConvert = new CloudConvert(process.env.CLOUDCONVERT_API_KEY!);
 
 export async function POST(req: Request) {
@@ -17,12 +18,10 @@ export async function POST(req: Request) {
     const body = await req.json();
     currentOrderId = body.orderId;
 
-    if (!currentOrderId) throw new Error("Order ID is missing");
-
     const { data: order } = await supabase.from('translations').select('*').eq('id', currentOrderId).single();
     if (!order) throw new Error('Order not found.');
 
-    // 1. Initial Status Update (Triggers the Dashboard pulse)
+    // 1. Initial UI update
     await supabase.from('translations').update({ processing_status: 'processing' }).eq('id', currentOrderId);
 
     const originalPath = order.image_url.includes('/documents/') ? order.image_url.split('/documents/')[1] : order.image_url.split('/').pop(); 
@@ -30,30 +29,55 @@ export async function POST(req: Request) {
     
     let finalProcessUrl = "";
 
-    // --- CASE 1: PDF or Word Doc (Convert to JPG first) ---
+    // --- CLOUDCONVERT LOGIC (PDF/DOCX) ---
     if (['pdf', 'docx', 'doc'].includes(fileExt || "")) {
+      console.log(`📡 CloudConvert: Starting conversion for ${fileExt}`);
+      
       const { data: fileBlob } = await supabase.storage.from('documents').download(originalPath!);
       const fileBuffer = Buffer.from(await fileBlob!.arrayBuffer());
 
+      // Create a Job as per V2 Documentation
       const job = await cloudConvert.jobs.create({
         tasks: {
-          'import-file': { operation: 'import/base64', file: fileBuffer.toString('base64'), filename: originalPath },
-          'convert-file': { operation: 'convert', input: 'import-file', output_format: 'jpg', width: 2000 },
-          'export-url': { operation: 'export/url', input: 'convert-file' }
+          'import-it': { 
+            operation: 'import/base64', 
+            file: fileBuffer.toString('base64'), 
+            filename: `input.${fileExt}` 
+          },
+          'convert-it': { 
+            operation: 'convert', 
+            input: 'import-it', 
+            output_format: 'jpg', 
+            width: 2200 // High density for AI OCR
+          },
+          'export-it': { 
+            operation: 'export/url', 
+            input: 'convert-it' 
+          }
         }
       });
 
+      // Wait for completion
       const finishedJob = await cloudConvert.jobs.wait(job.id);
-      const fileTask = finishedJob.tasks.find(t => t.name === 'export-url' && t.status === 'finished');
-      finalProcessUrl = (fileTask?.result as any).files[0].url;
+      
+      // Look for the specific export task
+      const exportTask = finishedJob.tasks.find((t: any) => t.name === 'export-it' && t.status === 'finished');
+      
+      if (!exportTask || !exportTask.result?.files?.[0]?.url) {
+        throw new Error("CloudConvert failed to generate a public URL.");
+      }
+
+      finalProcessUrl = exportTask.result.files[0].url;
+      console.log("✅ CloudConvert Success. JPG URL generated.");
     } 
-    // --- CASE 2: Standard Image ---
+    // --- DIRECT IMAGE PATH ---
     else {
       const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(originalPath!, 900);
       finalProcessUrl = signedData?.signedUrl || "";
     }
 
-    // --- SUBMIT TO WAVESPEED ---
+    // --- WAVESPEED V3 SUBMISSION ---
+    // documentation: POST https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator
     const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
       method: 'POST',
       headers: { 
@@ -71,14 +95,16 @@ export async function POST(req: Request) {
     const taskId = submitJson.data?.id;
 
     if (taskId) {
-      // Start polling (background)
       pollWaveSpeedV3(taskId, currentOrderId, supabase);
+    } else {
+      console.error("WaveSpeed Reject Raw:", JSON.stringify(submitJson));
+      throw new Error("WaveSpeed rejected the converted image URL.");
     }
 
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("VAULT_ENGINE_ERROR:", err.message);
+    console.error("🛑 VAULT_ENGINE_CRASH:", err.message);
     if (currentOrderId) {
       await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', currentOrderId);
     }
@@ -87,10 +113,10 @@ export async function POST(req: Request) {
 }
 
 /**
- * Polling Logic (Lives in the same file to fix 'not found' error)
+ * Polling Function (V3 Structure)
  */
 async function pollWaveSpeedV3(taskId: string, orderId: string, supabase: any) {
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 60; i++) { // Increased to 60 (8 mins) for complex docs
     await new Promise(r => setTimeout(r, 8000)); 
 
     try {
@@ -99,24 +125,22 @@ async function pollWaveSpeedV3(taskId: string, orderId: string, supabase: any) {
       });
       
       const responseJson = await res.json();
-      const status = responseJson.data?.status;
-      const outputs = responseJson.data?.outputs;
+      const data = responseJson.data;
 
-      if (status === "completed" && outputs && outputs.length > 0) {
-        // Trigger the automatic preview in Admin Dashboard
+      if (data?.status === "completed" && data?.outputs?.[0]) {
         await supabase.from('translations').update({ 
-          translated_url: outputs[0], 
+          translated_url: data.outputs[0], 
           processing_status: 'ready' 
         }).eq('id', orderId);
         return; 
       }
 
-      if (status === "failed") {
+      if (data?.status === "failed") {
         await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', orderId);
         return;
       }
     } catch (e) {
-      console.error("POLL_BLIP:", e);
+      console.error("Poll cycle failed, retrying...");
     }
   }
 }
