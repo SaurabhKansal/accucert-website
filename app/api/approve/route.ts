@@ -2,40 +2,37 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Helper to handle "Dirty" JSON from APIs (Fixes Position 233 Error)
+const robustParse = (text: string) => {
+  try {
+    // Finds the first valid { ... } block and ignores everything else
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (!match) return null;
+    return JSON.parse(match[0]);
+  } catch (e) {
+    return null;
+  }
+};
+
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     
-    // 1. INITIALIZE SUPABASE
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
+    if (!order) throw new Error('Order not found.');
 
-    // 2. FETCH ORDER
-    const { data: order, error: dbError } = await supabase
-      .from('translations')
-      .select('*')
-      .eq('id', orderId)
-      .single();
-
-    if (dbError || !order) throw new Error('Order not found.');
-
-    // 3. GENERATE SECURE ACCESS LINK
-    const filePath = order.image_url.split('/documents/')[1]; 
-    const { data: signedData } = await supabase.storage
-      .from('documents')
-      .createSignedUrl(filePath, 900); // 15 mins for heavy processing
-
-    if (!signedData?.signedUrl) throw new Error("Could not generate secure file access.");
-
-    // 4. MARK AS PROCESSING (Triggers Admin UI Spinner)
+    // 1. Mark as Processing immediately
     await supabase.from('translations').update({ 
       processing_status: 'processing',
-      processing_percentage: 5 
+      processing_percentage: 10 
     }).eq('id', orderId);
 
-    // 5. SUBMIT TASK TO WAVESPEED
+    // 2. Secure File Access
+    const filePath = order.image_url.split('/documents/')[1]; 
+    const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(filePath, 900);
+
+    // 3. Submit to WaveSpeed
     const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
       method: 'POST',
       headers: { 
@@ -43,28 +40,27 @@ export async function POST(req: Request) {
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({
-        image: signedData.signedUrl,
+        image: signedData?.signedUrl,
         target_language: "english",
-        output_format: "jpeg",
-        enable_sync_mode: false // Keep it async to prevent timeouts
+        output_format: "jpeg"
       })
     });
 
-    // Extract Task ID using robust parsing to avoid "Position 4" errors
     const rawSubmitText = await submitRes.text();
-    const cleanSubmitJson = JSON.parse(rawSubmitText.match(/\{[\s\S]*?\}/)?.[0] || "{}");
-    const taskId = cleanSubmitJson.id || cleanSubmitJson.data?.id;
+    const submitData = robustParse(rawSubmitText);
+    
+    // We look for 'id' at the top level or inside 'data'
+    const taskId = submitData?.id || submitData?.data?.id;
 
-    if (!taskId) throw new Error(`WaveSpeed did not provide a Task ID. Response: ${rawSubmitText}`);
+    if (!taskId) {
+      console.error("WAVESPEED_RAW_RESPONSE:", rawSubmitText);
+      throw new Error("WaveSpeed failed to return a valid Task ID.");
+    }
 
-    // 6. FIRE-AND-FORGET POLLING
-    // We do NOT 'await' this. It runs in the background while the UI returns immediately.
+    // 4. Background Polling (Fire and Forget)
     pollWaveSpeedInBackground(taskId, orderId, supabase);
 
-    return NextResponse.json({ 
-      success: true, 
-      message: "AI Reconstruction started in background." 
-    });
+    return NextResponse.json({ success: true });
 
   } catch (err: any) {
     console.error("APPROVE_ROUTE_CRITICAL_FAILURE:", err.message);
@@ -72,61 +68,41 @@ export async function POST(req: Request) {
   }
 }
 
-/**
- * Background Worker: Polls WaveSpeed and Updates Percentage in Supabase
- */
 async function pollWaveSpeedInBackground(taskId: string, orderId: string, supabase: any) {
-  const maxAttempts = 25; // ~150 seconds total
-  let finalUrl = "";
-
+  const maxAttempts = 30; 
   for (let i = 1; i <= maxAttempts; i++) {
-    // Wait 6 seconds between checks
     await new Promise(r => setTimeout(r, 6000));
 
-    // Calculate simulated percentage (reaches ~90% before completion)
-    const progressPercent = Math.min(Math.round((i / maxAttempts) * 90), 95);
-    
-    // Update DB with current progress for real-time UI
-    await supabase.from('translations').update({ 
-      processing_percentage: progressPercent 
-    }).eq('id', orderId);
+    // Update Simulated Progress
+    const progress = Math.min(Math.round((i / maxAttempts) * 90), 98);
+    await supabase.from('translations').update({ processing_percentage: progress }).eq('id', orderId);
 
     try {
-      const statusRes = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}/result`, {
+      const res = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}/result`, {
         headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
       });
       
-      const rawStatusText = await statusRes.text();
-      const statusData = JSON.parse(rawStatusText.match(/\{[\s\S]*?\}/)?.[0] || "{}");
+      const rawText = await res.text();
+      const result = robustParse(rawText);
 
-      // Handle Success
-      if (statusData.status === "completed" || statusData.data?.status === "completed") {
-        finalUrl = statusData.data?.outputs?.[0] || statusData.outputs?.[0];
-        
-        if (finalUrl) {
+      if (result?.status === "completed" || result?.data?.status === "completed") {
+        const url = result?.data?.outputs?.[0] || result?.outputs?.[0];
+        if (url) {
           await supabase.from('translations').update({ 
-            translated_url: finalUrl,
+            translated_url: url,
             processing_status: 'ready',
             processing_percentage: 100 
           }).eq('id', orderId);
-          return; // Exit loop
+          return;
         }
       }
 
-      // Handle Failure
-      if (statusData.status === "failed" || statusData.data?.status === "failed") {
-        await supabase.from('translations').update({ 
-          processing_status: 'failed',
-          processing_percentage: 0 
-        }).eq('id', orderId);
+      if (result?.status === "failed") {
+        await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', orderId);
         return;
       }
-
     } catch (e) {
-      console.error("POLLING_ITERATION_ERROR:", e);
+      console.error("POLLING_ERROR_ITERATION:", i);
     }
   }
-
-  // If we reach here, it timed out
-  await supabase.from('translations').update({ processing_status: 'timeout' }).eq(orderId);
 }
