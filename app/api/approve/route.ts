@@ -8,35 +8,16 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 export async function POST(req: Request) {
   try {
     const { orderId } = await req.json();
-    
-    // 1. INITIALIZE SUPABASE
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const { data: order } = await supabase.from('translations').select('*').eq('id', orderId).single();
 
-    // 2. FETCH ORDER DATA
-    const { data: order, error: dbError } = await supabase
-      .from('translations')
-      .select('*')
-      .eq('id', orderId)
-      .single();
+    if (!order) throw new Error('Order not found.');
 
-    if (dbError || !order) throw new Error('Order not found in database.');
-
-    // 3. GENERATE SIGNED URL FOR WAVESPEED ACCESS
+    // 1. GENERATE SECURE LINK
     const filePath = order.image_url.split('/documents/')[1]; 
-    const { data: signedData, error: signedError } = await supabase
-      .storage
-      .from('documents')
-      .createSignedUrl(filePath, 300); // 5 minute window
-
-    if (signedError || !signedData?.signedUrl) {
-      throw new Error(`Accessibility Error: ${signedError?.message || "Could not sign URL"}`);
-    }
-
-    // 4. SUBMIT TASK TO WAVESPEED V3
-    // Endpoint is model-specific as per documentation
+    const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(filePath, 600);
+    
+    // 2. SUBMIT TO WAVESPEED V3
     const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
       method: 'POST',
       headers: { 
@@ -44,68 +25,59 @@ export async function POST(req: Request) {
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({
-        image: signedData.signedUrl,
+        image: signedData?.signedUrl,
         target_language: "english",
-        output_format: "jpeg",
-        enable_sync_mode: false,
-        enable_base64_output: false
+        output_format: "jpeg"
       })
     });
 
     const submitData = await submitRes.json();
-    if (!submitRes.ok || !submitData.id) {
-      throw new Error(`WaveSpeed Submission Failed: ${submitData.message || "Unknown error"}`);
-    }
+    const taskId = submitData.id || submitData.data?.id;
 
-    const taskId = submitData.id;
+    if (!taskId) throw new Error("WaveSpeed did not provide a Task ID.");
 
-    // 5. POLLING LOOP (Check Status)
+    // 3. POLLING FOR COMPLETION
     let finalDownloadUrl = "";
-    const maxAttempts = 20; 
-    
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, 5000)); // Wait 5 seconds
-
-      // Check Status Endpoint
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 6000));
+      
       const statusRes = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}`, {
         headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
       });
 
       const statusData = await statusRes.json();
-      const currentStatus = statusData.status;
-
-      if (currentStatus === "completed") {
-        // Fetch Result Endpoint (New requirement in V3)
+      
+      if (statusData.status === "completed") {
+        // Fetch result specifically to get the outputs array
         const resultRes = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}/result`, {
           headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
         });
         const resultData = await resultRes.json();
         
-        // Output is returned as an array in the result schema
-        finalDownloadUrl = resultData.outputs?.[0];
+        // --- CRITICAL FIX: Extraction ---
+        finalDownloadUrl = resultData.data?.outputs?.[0] || resultData.outputs?.[0];
+        console.log("FINAL URL FOUND:", finalDownloadUrl);
         break;
       }
-
-      if (currentStatus === "failed") {
-        throw new Error(`WaveSpeed Processing Failed: ${statusData.error || "Internal AI error"}`);
-      }
+      if (statusData.status === "failed") throw new Error("WaveSpeed AI failed processing.");
     }
 
-    if (!finalDownloadUrl) throw new Error("Translation timed out during polling.");
+    if (!finalDownloadUrl) throw new Error("Translation URL extraction failed.");
 
-    // 6. DOWNLOAD TRANSLATED FILE
-    const fileBuffer = await fetch(finalDownloadUrl).then(res => res.arrayBuffer());
+    // 4. DOWNLOAD THE FILE (with error catch)
+    const fileRes = await fetch(finalDownloadUrl);
+    if (!fileRes.ok) throw new Error("Failed to download result from WaveSpeed CDN.");
+    const fileBuffer = await fileRes.arrayBuffer();
 
-    // 7. DISPATCH VIA RESEND
-    await resend.emails.send({
+    // 5. DISPATCH VIA RESEND
+    const emailResult = await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: order.user_email,
-      subject: `Certified Translation Delivery: ${order.full_name}`,
+      subject: `Official Certified Translation: ${order.full_name}`,
       html: `
-        <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+        <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 12px;">
           <h2 style="color: #003461;">Certified Document Delivery</h2>
-          <p>Hi ${order.full_name},</p>
-          <p>Your document has been professionally reconstructed and translated into English using our high-fidelity AI engine.</p>
+          <p>Hi ${order.full_name}, your reconstructed translation is attached.</p>
         </div>
       `,
       attachments: [{
@@ -114,13 +86,13 @@ export async function POST(req: Request) {
       }],
     });
 
-    // 8. UPDATE DATABASE
-    await supabase.from('translations').update({ status: 'completed' }).eq('id', orderId);
+    if (emailResult.error) throw new Error(`Resend Error: ${emailResult.error.message}`);
 
+    await supabase.from('translations').update({ status: 'completed' }).eq( 'id', orderId);
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error("WAVESPEED_V3_CRITICAL_FAILURE:", err.message);
+    console.error("ACCUCERT_FINAL_ERROR:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
