@@ -2,7 +2,10 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Use require to bypass the TypeScript module error you had earlier
+// --- FAKE CHANGE FOR VERCEL DEPLOYMENT ---
+// Build Trigger Version: 2026.02.04.1830 (Force Build)
+const VAULT_VERSION = "v2.1.0-multi-page-ready";
+
 const CloudConvert = require('cloudconvert');
 const cloudConvert = new CloudConvert(process.env.CLOUDCONVERT_API_KEY!);
 
@@ -18,129 +21,118 @@ export async function POST(req: Request) {
     const body = await req.json();
     currentOrderId = body.orderId;
 
+    if (!currentOrderId) throw new Error("Missing Order ID");
+
     const { data: order } = await supabase.from('translations').select('*').eq('id', currentOrderId).single();
     if (!order) throw new Error('Order not found.');
 
-    // 1. Initial UI update
-    await supabase.from('translations').update({ processing_status: 'processing' }).eq('id', currentOrderId);
+    // 1. Mark as processing (Triggers Dashboard Pulse)
+    await supabase.from('translations').update({ 
+      processing_status: 'processing' 
+    }).eq('id', currentOrderId);
 
-    const originalPath = order.image_url.includes('/documents/') ? order.image_url.split('/documents/')[1] : order.image_url.split('/').pop(); 
+    const originalPath = order.image_url.split('/documents/')[1] || order.image_url.split('/').pop(); 
     const fileExt = originalPath?.split('.').pop()?.toLowerCase();
     
-    let finalProcessUrl = "";
+    let sourcePages: string[] = [];
 
-    // --- CLOUDCONVERT LOGIC (PDF/DOCX) ---
+    // --- CASE 1: PDF or Word (Convert ALL pages to individual JPGs) ---
     if (['pdf', 'docx', 'doc'].includes(fileExt || "")) {
-      console.log(`📡 CloudConvert: Starting conversion for ${fileExt}`);
+      console.log(`📡 [${VAULT_VERSION}] Converting ${fileExt?.toUpperCase()} via CloudConvert...`);
       
       const { data: fileBlob } = await supabase.storage.from('documents').download(originalPath!);
       const fileBuffer = Buffer.from(await fileBlob!.arrayBuffer());
 
-      // Create a Job as per V2 Documentation
       const job = await cloudConvert.jobs.create({
         tasks: {
-          'import-it': { 
-            operation: 'import/base64', 
-            file: fileBuffer.toString('base64'), 
-            filename: `input.${fileExt}` 
-          },
-          'convert-it': { 
-            operation: 'convert', 
-            input: 'import-it', 
-            output_format: 'jpg', 
-            width: 2200 // High density for AI OCR
-          },
-          'export-it': { 
-            operation: 'export/url', 
-            input: 'convert-it' 
-          }
+          'import-it': { operation: 'import/base64', file: fileBuffer.toString('base64'), filename: `input.${fileExt}` },
+          'convert-it': { operation: 'convert', input: 'import-it', output_format: 'jpg', width: 2000 },
+          'export-it': { operation: 'export/url', input: 'convert-it' }
         }
       });
 
-      // Wait for completion
       const finishedJob = await cloudConvert.jobs.wait(job.id);
-      
-      // Look for the specific export task
       const exportTask = finishedJob.tasks.find((t: any) => t.name === 'export-it' && t.status === 'finished');
       
-      if (!exportTask || !exportTask.result?.files?.[0]?.url) {
-        throw new Error("CloudConvert failed to generate a public URL.");
-      }
-
-      finalProcessUrl = exportTask.result.files[0].url;
-      console.log("✅ CloudConvert Success. JPG URL generated.");
+      // Grab ALL generated page URLs (handles 1 page or many)
+      sourcePages = exportTask.result.files.map((f: any) => f.url);
+      console.log(`✅ CloudConvert: Found ${sourcePages.length} page(s).`);
     } 
-    // --- DIRECT IMAGE PATH ---
+    // --- CASE 2: Single Image ---
     else {
       const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(originalPath!, 900);
-      finalProcessUrl = signedData?.signedUrl || "";
+      sourcePages = [signedData?.signedUrl || ""];
     }
 
-    // --- WAVESPEED V3 SUBMISSION ---
-    // documentation: POST https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator
-    const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`, 
-        'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify({ 
-        image: finalProcessUrl, 
-        target_language: "english", 
-        output_format: "jpeg" 
-      })
-    });
+    // --- TRIGGER SEQUENTIAL AI PROCESSING (Background) ---
+    processPagesInOrder(sourcePages, currentOrderId, supabase);
 
-    const submitJson = await submitRes.json();
-    const taskId = submitJson.data?.id;
-
-    if (taskId) {
-      pollWaveSpeedV3(taskId, currentOrderId, supabase);
-    } else {
-      console.error("WaveSpeed Reject Raw:", JSON.stringify(submitJson));
-      throw new Error("WaveSpeed rejected the converted image URL.");
-    }
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, version: VAULT_VERSION });
 
   } catch (err: any) {
-    console.error("🛑 VAULT_ENGINE_CRASH:", err.message);
+    console.error(`🛑 ENGINE_CRASH [${VAULT_VERSION}]:`, err.message);
     if (currentOrderId) {
       await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', currentOrderId);
     }
-    return NextResponse.json({ success: true }); 
+    return NextResponse.json({ success: true, error: err.message }); 
   }
 }
 
 /**
- * Polling Function (V3 Structure)
+ * Handles multiple pages one-by-one so WaveSpeed doesn't choke
  */
-async function pollWaveSpeedV3(taskId: string, orderId: string, supabase: any) {
-  for (let i = 0; i < 60; i++) { // Increased to 60 (8 mins) for complex docs
-    await new Promise(r => setTimeout(r, 8000)); 
+async function processPagesInOrder(urls: string[], orderId: string, supabase: any) {
+  const completedUrls: string[] = [];
 
+  for (const [index, pageUrl] of urls.entries()) {
+    try {
+      const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`, 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ 
+          image: pageUrl, 
+          target_language: "english", 
+          output_format: "jpeg" 
+        })
+      });
+
+      const submitJson = await submitRes.json();
+      const taskId = submitJson.data?.id;
+
+      if (taskId) {
+        const translatedPage = await pollSinglePage(taskId);
+        if (translatedPage) {
+          completedUrls.push(translatedPage);
+          
+          // Progressive update: pages appear in dashboard as they finish
+          await supabase.from('translations').update({ 
+            translated_url: completedUrls.join(','),
+            processing_status: index === urls.length - 1 ? 'ready' : 'processing'
+          }).eq('id', orderId);
+        }
+      }
+    } catch (e) {
+      console.error(`Page ${index} failed:`, e);
+    }
+  }
+}
+
+async function pollSinglePage(taskId: string): Promise<string | null> {
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 8000));
     try {
       const res = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}`, {
         headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
       });
-      
-      const responseJson = await res.json();
-      const data = responseJson.data;
-
-      if (data?.status === "completed" && data?.outputs?.[0]) {
-        await supabase.from('translations').update({ 
-          translated_url: data.outputs[0], 
-          processing_status: 'ready' 
-        }).eq('id', orderId);
-        return; 
+      const json = await res.json();
+      if (json.data?.status === "completed" && json.data?.outputs?.[0]) {
+        return json.data.outputs[0];
       }
-
-      if (data?.status === "failed") {
-        await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', orderId);
-        return;
-      }
-    } catch (e) {
-      console.error("Poll cycle failed, retrying...");
-    }
+      if (json.data?.status === "failed") return null;
+    } catch (e) { /* retry */ }
   }
+  return null;
 }
