@@ -1,13 +1,12 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import CloudConvert from 'cloudconvert';
 
-// --- FAKE CHANGE FOR VERCEL DEPLOYMENT ---
-// Build Trigger Version: 2026.02.04.1830 (Force Build)
-const VAULT_VERSION = "v2.1.0-multi-page-ready";
-
-const CloudConvert = require('cloudconvert');
 const cloudConvert = new CloudConvert(process.env.CLOUDCONVERT_API_KEY!);
+
+// Triggering a fresh build for Vercel
+const VAULT_VERSION = "v2.1.2-type-safe-export";
 
 export async function POST(req: Request) {
   const supabase = createClient(
@@ -26,20 +25,15 @@ export async function POST(req: Request) {
     const { data: order } = await supabase.from('translations').select('*').eq('id', currentOrderId).single();
     if (!order) throw new Error('Order not found.');
 
-    // 1. Mark as processing (Triggers Dashboard Pulse)
-    await supabase.from('translations').update({ 
-      processing_status: 'processing' 
-    }).eq('id', currentOrderId);
+    await supabase.from('translations').update({ processing_status: 'processing' }).eq('id', currentOrderId);
 
     const originalPath = order.image_url.split('/documents/')[1] || order.image_url.split('/').pop(); 
     const fileExt = originalPath?.split('.').pop()?.toLowerCase();
     
     let sourcePages: string[] = [];
 
-    // --- CASE 1: PDF or Word (Convert ALL pages to individual JPGs) ---
+    // --- CASE 1: PDF or Word (Multi-page support) ---
     if (['pdf', 'docx', 'doc'].includes(fileExt || "")) {
-      console.log(`📡 [${VAULT_VERSION}] Converting ${fileExt?.toUpperCase()} via CloudConvert...`);
-      
       const { data: fileBlob } = await supabase.storage.from('documents').download(originalPath!);
       const fileBuffer = Buffer.from(await fileBlob!.arrayBuffer());
 
@@ -52,11 +46,15 @@ export async function POST(req: Request) {
       });
 
       const finishedJob = await cloudConvert.jobs.wait(job.id);
+      
+      // FIX: Guard against undefined exportTask
       const exportTask = finishedJob.tasks.find((t: any) => t.name === 'export-it' && t.status === 'finished');
       
-      // Grab ALL generated page URLs (handles 1 page or many)
+      if (!exportTask || !exportTask.result || !exportTask.result.files) {
+        throw new Error("CloudConvert conversion task failed or returned no files.");
+      }
+      
       sourcePages = exportTask.result.files.map((f: any) => f.url);
-      console.log(`✅ CloudConvert: Found ${sourcePages.length} page(s).`);
     } 
     // --- CASE 2: Single Image ---
     else {
@@ -64,7 +62,6 @@ export async function POST(req: Request) {
       sourcePages = [signedData?.signedUrl || ""];
     }
 
-    // --- TRIGGER SEQUENTIAL AI PROCESSING (Background) ---
     processPagesInOrder(sourcePages, currentOrderId, supabase);
 
     return NextResponse.json({ success: true, version: VAULT_VERSION });
@@ -74,13 +71,10 @@ export async function POST(req: Request) {
     if (currentOrderId) {
       await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', currentOrderId);
     }
-    return NextResponse.json({ success: true, error: err.message }); 
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 }); 
   }
 }
 
-/**
- * Handles multiple pages one-by-one so WaveSpeed doesn't choke
- */
 async function processPagesInOrder(urls: string[], orderId: string, supabase: any) {
   const completedUrls: string[] = [];
 
@@ -92,11 +86,7 @@ async function processPagesInOrder(urls: string[], orderId: string, supabase: an
           'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`, 
           'Content-Type': 'application/json' 
         },
-        body: JSON.stringify({ 
-          image: pageUrl, 
-          target_language: "english", 
-          output_format: "jpeg" 
-        })
+        body: JSON.stringify({ image: pageUrl, target_language: "english", output_format: "jpeg" })
       });
 
       const submitJson = await submitRes.json();
@@ -107,7 +97,6 @@ async function processPagesInOrder(urls: string[], orderId: string, supabase: an
         if (translatedPage) {
           completedUrls.push(translatedPage);
           
-          // Progressive update: pages appear in dashboard as they finish
           await supabase.from('translations').update({ 
             translated_url: completedUrls.join(','),
             processing_status: index === urls.length - 1 ? 'ready' : 'processing'
