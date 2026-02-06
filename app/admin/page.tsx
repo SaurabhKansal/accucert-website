@@ -20,7 +20,6 @@ export default function AdminDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedReq, setSelectedReq] = useState<any>(null);
   const [editText, setEditText] = useState("");
-  const [showLivePreview, setShowLivePreview] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
 
@@ -50,24 +49,29 @@ export default function AdminDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Modal-specific real-time subscription (Crucial for auto-fetching preview)
+  // Modal-specific real-time subscription (Aggressive Fix)
   useEffect(() => {
     if (!selectedReq) return;
     
+    // Unique channel to prevent cache-lag
     const sub = supabase
-      .channel(`realtime-order-${selectedReq.id}`)
+      .channel(`realtime-order-${selectedReq.id}-${Date.now()}`)
       .on('postgres_changes', { 
         event: 'UPDATE', 
         schema: 'public', 
         table: 'translations', 
         filter: `id=eq.${selectedReq.id}` 
       }, (payload) => {
-        console.log("📡 Real-time Engine Update:", payload.new.processing_status);
+        console.log("📡 Engine Update Detected:", payload.new.processing_status);
         
-        // This is where the magic happens: state updates automatically
         setAiStatus(payload.new.processing_status);
         if (payload.new.translated_url) {
           setAiResultUrl(payload.new.translated_url);
+        }
+        
+        // Refresh background list if ready
+        if (payload.new.processing_status === 'ready') {
+            fetchRequests();
         }
       })
       .subscribe();
@@ -83,20 +87,14 @@ export default function AdminDashboard() {
 
   const openReview = (req: any) => {
     setSelectedReq(req);
-    setEditText(req.extracted_text || "");
+    // Use manual edits if they exist, otherwise fallback to extracted text
+    setEditText(req.manual_edits || req.extracted_text || ""); 
     setAiStatus(req.processing_status || "idle");
     setAiResultUrl(req.translated_url || "");
-    setShowLivePreview(false);
   };
 
-  /**
-   * TRIGGER AI RECONSTRUCTION
-   * Updates local state immediately to avoid 'idle' lag
-   */
   async function handleTriggerAI() {
     if (!selectedReq) return;
-    
-    // UI Feedback: Immediately start the orange pulse
     setIsProcessing(true);
     setAiStatus("processing"); 
 
@@ -107,23 +105,15 @@ export default function AdminDashboard() {
         body: JSON.stringify({ orderId: selectedReq.id }),
       });
 
-      if (!res.ok && aiStatus === 'idle') {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Network error");
-      }
+      if (!res.ok) throw new Error("Initialization failed");
     } catch (err: any) {
-      if (aiStatus === 'idle') {
-        setAiStatus("idle");
-        alert("CRITICAL_START_ERROR: " + err.message);
-      }
+      setAiStatus("idle");
+      alert("ENGINE_ERROR: " + err.message);
     } finally {
       setIsProcessing(false);
     }
   }
 
-  /**
-   * DISPATCH FINAL EMAIL
-   */
   async function handleDispatchEmail() {
     if (!selectedReq || !aiResultUrl) return;
     setIsDispatching(true);
@@ -131,10 +121,18 @@ export default function AdminDashboard() {
       const res = await fetch("/api/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: selectedReq.id }),
+        body: JSON.stringify({ 
+          orderId: selectedReq.id,
+          htmlContent: editText, // Send manual edits
+          translatedUrls: aiResultUrl, // Send AI images
+          fullName: selectedReq.full_name,
+          userEmail: selectedReq.user_email,
+          // Extract extension from original image_url
+          originalFormat: selectedReq.image_url.split('.').pop().toLowerCase()
+        }),
       });
       if (res.ok) {
-        alert("🚀 DISPATCHED: Official Translation sent to client.");
+        alert("🚀 DISPATCHED: Official Translation sent in original format.");
         setSelectedReq(null);
         fetchRequests();
       }
@@ -156,13 +154,12 @@ export default function AdminDashboard() {
     switch(status) {
       case 'ready': return 'Reconstructed';
       case 'processing': return 'In Progress';
-      case 'created': return 'Task Queued';
       case 'failed': return 'Failed';
       default: return 'Idle';
     }
   };
 
-  if (loading) return <div className="p-20 text-center font-bold">VAULT_ACCESS_IN_PROGRESS...</div>;
+  if (loading) return <div className="p-20 text-center font-black uppercase tracking-widest opacity-20">Accessing_Vault...</div>;
 
   return (
     <div className="min-h-screen bg-slate-100 p-8 text-slate-900 font-sans">
@@ -234,7 +231,6 @@ export default function AdminDashboard() {
             </div>
 
             <div className="flex-1 overflow-hidden grid md:grid-cols-2">
-              {/* LEFT SIDE: AUTO-FETCH PREVIEW */}
               <div className="bg-slate-900 p-8 overflow-auto space-y-10 custom-scrollbar">
                 <div className="space-y-3">
                   <p className="text-white text-[9px] font-black uppercase tracking-[0.3em] opacity-30">Source_Input</p>
@@ -242,13 +238,14 @@ export default function AdminDashboard() {
                 </div>
                 
                 {aiResultUrl ? (
-                  <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
                     <p className="text-blue-400 text-[9px] font-black uppercase tracking-[0.3em]">AI_Reconstruction_Result</p>
-                    <img 
-                      src={aiResultUrl} 
-                      className="w-full rounded shadow-2xl border-4 border-blue-500/20" 
-                      alt="Preview Ready"
-                    />
+                    {aiResultUrl.split(',').map((url, idx) => (
+                      <div key={idx} className="space-y-2">
+                         <span className="text-[8px] text-white/20 font-black tracking-widest uppercase">Page_{idx + 1}</span>
+                         <img src={url} className="w-full rounded shadow-2xl border-4 border-blue-500/20" />
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-[3rem]">
@@ -261,28 +258,20 @@ export default function AdminDashboard() {
               </div>
 
               <div className="p-10 flex flex-col bg-white overflow-hidden">
-                <div className="mb-8 p-10 bg-slate-900 rounded-[3rem] shadow-2xl flex flex-col items-center justify-center text-center">
-                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.4em] mb-4">Engine Engine Status</p>
-                   
-                   <div className="flex items-center gap-4 mb-6">
+                <div className="mb-8 p-10 bg-slate-900 rounded-[3rem] shadow-2xl flex flex-col items-center justify-center text-center relative overflow-hidden">
+                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.4em] mb-4 z-10">Engine Status</p>
+                   <div className="flex items-center gap-4 mb-6 z-10">
                       <div className={`w-4 h-4 rounded-full ${aiStatus === 'ready' ? 'bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.8)]' : aiStatus === 'idle' ? 'bg-white/20' : 'bg-orange-500 animate-ping'}`} />
                       <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">
                         {getStatusLabel(aiStatus)}
                       </h3>
                    </div>
-
                    {aiStatus === 'idle' || aiStatus === 'failed' ? (
-                     <button 
-                       onClick={handleTriggerAI}
-                       disabled={isProcessing}
-                       className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/20"
-                     >
+                     <button onClick={handleTriggerAI} disabled={isProcessing} className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all z-10">
                        {isProcessing ? "INITIALIZING..." : "START_RECONSTRUCTION"}
                      </button>
-                   ) : aiStatus === 'ready' ? (
-                      <p className="text-green-400 text-[10px] font-black uppercase tracking-widest">System_Ready: Verification Required</p>
                    ) : (
-                      <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em]">The AI is currently working in the background...</p>
+                      <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em] z-10">Manual Edits Enabled Below</p>
                    )}
                 </div>
 
@@ -295,13 +284,13 @@ export default function AdminDashboard() {
             <div className="p-10 border-t bg-slate-50 flex justify-between items-center">
                 <div className="flex gap-12 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                     <div>
-                        <p>Payment_Auth</p>
+                        <p>Payment</p>
                         <p className={`text-sm mt-1 ${selectedReq.payment_status === 'paid' ? 'text-green-600' : 'text-red-500'}`}>{selectedReq.payment_status === 'paid' ? 'VERIFIED' : 'UNPAID'}</p>
                     </div>
                 </div>
                 
                 <div className="flex gap-6">
-                  <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 tracking-widest">CLOSE_VAULT</button>
+                  <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 tracking-widest">CANCEL</button>
                   <button 
                     onClick={handleDispatchEmail} 
                     disabled={aiStatus !== 'ready' || isDispatching} 
@@ -320,7 +309,6 @@ export default function AdminDashboard() {
         .ql-toolbar { border: none !important; background: white; border-radius: 2rem 2rem 0 0; padding: 20px !important; }
         .ql-editor { padding: 50px !important; line-height: 1.8; color: #1e293b; }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
       `}</style>
     </div>
