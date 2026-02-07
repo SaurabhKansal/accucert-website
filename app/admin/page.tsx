@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import dynamic from "next/dynamic";
 import 'react-quill-new/dist/quill.snow.css';
@@ -37,7 +37,17 @@ export default function AdminDashboard() {
     ],
   }), []);
 
-  // Main table list subscription
+  // 1. Fetch function pulled out so it can be reused
+  const fetchRequests = useCallback(async () => {
+    const { data } = await supabase
+      .from("translations")
+      .select("*")
+      .order("created_at", { ascending: false });
+    setRequests(data || []);
+    setLoading(false);
+  }, []);
+
+  // 2. Main table list subscription (Background updates)
   useEffect(() => {
     fetchRequests();
     const channel = supabase
@@ -47,29 +57,32 @@ export default function AdminDashboard() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [fetchRequests]);
 
-  // Modal-specific real-time subscription (Aggressive Fix)
+  // 3. Modal-specific Real-time subscription (STRENGTHENED)
   useEffect(() => {
     if (!selectedReq) return;
     
-    // Unique channel to prevent cache-lag
+    // Using a timestamped channel name to prevent stale cache connections
+    const channelName = `realtime-order-${selectedReq.id}-${Date.now()}`;
+    
     const sub = supabase
-      .channel(`realtime-order-${selectedReq.id}-${Date.now()}`)
+      .channel(channelName)
       .on('postgres_changes', { 
         event: 'UPDATE', 
         schema: 'public', 
         table: 'translations', 
         filter: `id=eq.${selectedReq.id}` 
       }, (payload) => {
-        console.log("📡 Engine Update Detected:", payload.new.processing_status);
+        console.log("📡 LIVE_UPDATE_RECEIVED:", payload.new.processing_status);
         
+        // Immediate UI state sync
         setAiStatus(payload.new.processing_status);
         if (payload.new.translated_url) {
           setAiResultUrl(payload.new.translated_url);
         }
         
-        // Refresh background list if ready
+        // Refresh the main table so the status reflects 'Ready' there too
         if (payload.new.processing_status === 'ready') {
             fetchRequests();
         }
@@ -77,17 +90,11 @@ export default function AdminDashboard() {
       .subscribe();
 
     return () => { supabase.removeChannel(sub); };
-  }, [selectedReq]);
-
-  async function fetchRequests() {
-    const { data } = await supabase.from("translations").select("*").order("created_at", { ascending: false });
-    setRequests(data || []);
-    setLoading(false);
-  }
+  }, [selectedReq, fetchRequests]);
 
   const openReview = (req: any) => {
     setSelectedReq(req);
-    // Use manual edits if they exist, otherwise fallback to extracted text
+    // Prioritize manual edits if the user has already typed something
     setEditText(req.manual_edits || req.extracted_text || ""); 
     setAiStatus(req.processing_status || "idle");
     setAiResultUrl(req.translated_url || "");
@@ -95,6 +102,7 @@ export default function AdminDashboard() {
 
   async function handleTriggerAI() {
     if (!selectedReq) return;
+    
     setIsProcessing(true);
     setAiStatus("processing"); 
 
@@ -106,9 +114,10 @@ export default function AdminDashboard() {
       });
 
       if (!res.ok) throw new Error("Initialization failed");
+      console.log("🚀 Engine Handshake Success");
     } catch (err: any) {
       setAiStatus("idle");
-      alert("ENGINE_ERROR: " + err.message);
+      alert("ENGINE_TRIGGER_ERROR: " + err.message);
     } finally {
       setIsProcessing(false);
     }
@@ -123,16 +132,15 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           orderId: selectedReq.id,
-          htmlContent: editText, // Send manual edits
-          translatedUrls: aiResultUrl, // Send AI images
+          htmlContent: editText, 
+          translatedUrls: aiResultUrl,
           fullName: selectedReq.full_name,
           userEmail: selectedReq.user_email,
-          // Extract extension from original image_url
           originalFormat: selectedReq.image_url.split('.').pop().toLowerCase()
         }),
       });
       if (res.ok) {
-        alert("🚀 DISPATCHED: Official Translation sent in original format.");
+        alert("🚀 DISPATCHED: Official Translation sent successfully.");
         setSelectedReq(null);
         fetchRequests();
       }
@@ -250,8 +258,8 @@ export default function AdminDashboard() {
                 ) : (
                   <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-[3rem]">
                      <div className={`w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full ${aiStatus === 'processing' ? 'animate-spin' : ''} mb-4`} />
-                     <p className="text-white/20 text-[10px] font-black uppercase tracking-widest text-center">
-                        {aiStatus === 'processing' ? 'AI is Re-drawing pixels...' : 'Awaiting Engine Trigger...'}
+                     <p className="text-white/20 text-[10px] font-black uppercase tracking-widest text-center px-10">
+                        {aiStatus === 'processing' ? 'The AI is currently re-drawing pixels for all pages...' : 'Awaiting Engine Trigger...'}
                      </p>
                   </div>
                 )}
@@ -259,7 +267,7 @@ export default function AdminDashboard() {
 
               <div className="p-10 flex flex-col bg-white overflow-hidden">
                 <div className="mb-8 p-10 bg-slate-900 rounded-[3rem] shadow-2xl flex flex-col items-center justify-center text-center relative overflow-hidden">
-                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.4em] mb-4 z-10">Engine Status</p>
+                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.4em] mb-4 z-10">Engine Control Status</p>
                    <div className="flex items-center gap-4 mb-6 z-10">
                       <div className={`w-4 h-4 rounded-full ${aiStatus === 'ready' ? 'bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.8)]' : aiStatus === 'idle' ? 'bg-white/20' : 'bg-orange-500 animate-ping'}`} />
                       <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">
@@ -267,11 +275,11 @@ export default function AdminDashboard() {
                       </h3>
                    </div>
                    {aiStatus === 'idle' || aiStatus === 'failed' ? (
-                     <button onClick={handleTriggerAI} disabled={isProcessing} className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all z-10">
+                     <button onClick={handleTriggerAI} disabled={isProcessing} className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-[11px] tracking-widest hover:bg-blue-500 transition-all z-10 shadow-xl shadow-blue-500/20">
                        {isProcessing ? "INITIALIZING..." : "START_RECONSTRUCTION"}
                      </button>
                    ) : (
-                      <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em] z-10">Manual Edits Enabled Below</p>
+                      <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em] z-10">Live Text Editing Enabled Below</p>
                    )}
                 </div>
 
@@ -284,17 +292,21 @@ export default function AdminDashboard() {
             <div className="p-10 border-t bg-slate-50 flex justify-between items-center">
                 <div className="flex gap-12 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                     <div>
+                        <p>User_Email</p>
+                        <p className="text-sm mt-1 text-slate-900">{selectedReq.user_email}</p>
+                    </div>
+                    <div>
                         <p>Payment</p>
                         <p className={`text-sm mt-1 ${selectedReq.payment_status === 'paid' ? 'text-green-600' : 'text-red-500'}`}>{selectedReq.payment_status === 'paid' ? 'VERIFIED' : 'UNPAID'}</p>
                     </div>
                 </div>
                 
                 <div className="flex gap-6">
-                  <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 tracking-widest">CANCEL</button>
+                  <button onClick={() => setSelectedReq(null)} className="font-black text-[11px] text-slate-400 tracking-widest uppercase">Close_Vault</button>
                   <button 
                     onClick={handleDispatchEmail} 
                     disabled={aiStatus !== 'ready' || isDispatching} 
-                    className="bg-slate-900 text-white px-24 py-6 rounded-[2rem] font-black text-xs hover:bg-blue-600 transition-all disabled:opacity-30"
+                    className="bg-slate-900 text-white px-24 py-6 rounded-[2rem] font-black text-xs hover:bg-blue-600 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     {isDispatching ? "DISPATCHING..." : "SIGN & DISPATCH"}
                   </button>
