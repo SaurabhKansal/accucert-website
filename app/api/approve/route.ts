@@ -5,8 +5,8 @@ import CloudConvert from 'cloudconvert';
 
 const cloudConvert = new CloudConvert(process.env.CLOUDCONVERT_API_KEY!);
 
-// FORCE VERCEL BUILD TRIGGER: v2.1.5-Handshake-Stability
-const VAULT_ENGINE_VERSION = "2.1.5";
+// FORCE VERCEL BUILD TRIGGER: v2.1.6-Webhook-Architecture
+const VAULT_ENGINE_VERSION = "2.1.6";
 
 export async function POST(req: Request) {
   const supabase = createClient(
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     
     let sourcePages: string[] = [];
 
-    // --- CASE 1: PDF or Word (Multi-page support) ---
+    // --- STEP 1: CONVERSION (PDF/Docx to JPG) ---
     if (['pdf', 'docx', 'doc'].includes(fileExt || "")) {
       const { data: fileBlob } = await supabase.storage.from('documents').download(originalPath!);
       const fileBuffer = Buffer.from(await fileBlob!.arrayBuffer());
@@ -49,45 +49,55 @@ export async function POST(req: Request) {
       });
 
       const finishedJob = await cloudConvert.jobs.wait(job.id);
-      
-      // FIX: Type Safety Guards for exportTask
       const exportTask = finishedJob.tasks.find((t: any) => t.name === 'export-it' && t.status === 'finished');
       
       if (!exportTask?.result?.files) {
-        throw new Error("CloudConvert conversion task failed or result is undefined.");
+        throw new Error("CloudConvert conversion failed.");
       }
       
       sourcePages = exportTask.result.files.map((f: any) => f.url);
     } 
-    // --- CASE 2: Single Image ---
+    // --- STEP 2: IMAGE HANDLING ---
     else {
       const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(originalPath!, 900);
       sourcePages = [signedData?.signedUrl || ""];
     }
 
-    // --- CASE 3: WAVE SPEED HANDSHAKE ---
-    // We submit the first page synchronously to prevent Vercel from killing the process too early
-    const firstPageUrl = sourcePages[0];
-    const submitRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`, 
-        'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify({ image: firstPageUrl, target_language: "english", output_format: "jpeg" })
-    });
+    // --- STEP 3: WEBHOOK SETUP ---
+    // This dynamically detects your Vercel URL (e.g., https://accucert.vercel.app)
+    const host = req.headers.get('host');
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const webhookUrl = `${protocol}://${host}/api/webhook-wavespeed?orderId=${currentOrderId}`;
 
-    const submitJson = await submitRes.json();
-    const firstTaskId = submitJson.data?.id;
+    // --- STEP 4: SUBMIT TO WAVESPEED ---
+    for (const pageUrl of sourcePages) {
+      console.log(`🚀 Sending Page to WaveSpeed with Webhook: ${webhookUrl}`);
+      
+      const waveRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`, 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ 
+          image: pageUrl, 
+          target_language: "english", 
+          output_format: "jpeg",
+          webhook: webhookUrl // Critical fix: Tells WaveSpeed where to send results
+        })
+      });
 
-    if (firstTaskId) {
-      // Background the rest (polling and extra pages)
-      processRemainingPages(firstTaskId, sourcePages, currentOrderId, supabase);
-    } else {
-      throw new Error(`WaveSpeed rejected submission: ${JSON.stringify(submitJson)}`);
+      const waveData = await waveRes.json();
+      if (!waveRes.ok) {
+        throw new Error(`WaveSpeed Rejection: ${JSON.stringify(waveData)}`);
+      }
     }
 
-    return NextResponse.json({ success: true, engine_version: VAULT_ENGINE_VERSION });
+    return NextResponse.json({ 
+      success: true, 
+      engine_version: VAULT_ENGINE_VERSION,
+      webhook_active: webhookUrl 
+    });
 
   } catch (err: any) {
     console.error(`🛑 ENGINE_CRASH [${VAULT_ENGINE_VERSION}]:`, err.message);
@@ -96,59 +106,4 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ success: false, error: err.message }, { status: 500 }); 
   }
-}
-
-// Background poller for the remaining pages
-async function processRemainingPages(firstTaskId: string, allUrls: string[], orderId: string, supabase: any) {
-  const completedUrls: string[] = [];
-  
-  // 1. Handle the first page already submitted
-  const firstUrl = await pollSinglePage(firstTaskId);
-  if (firstUrl) {
-    completedUrls.push(firstUrl);
-    await supabase.from('translations').update({ 
-      translated_url: completedUrls.join(','),
-      processing_status: allUrls.length === 1 ? 'ready' : 'processing'
-    }).eq('id', orderId);
-  }
-
-  // 2. Handle pages 2+ if they exist
-  if (allUrls.length > 1) {
-    for (let i = 1; i < allUrls.length; i++) {
-      try {
-        const res = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: allUrls[i], target_language: "english", output_format: "jpeg" })
-        });
-        const json = await res.json();
-        const tid = json.data?.id;
-        if (tid) {
-          const translated = await pollSinglePage(tid);
-          if (translated) {
-            completedUrls.push(translated);
-            await supabase.from('translations').update({ 
-              translated_url: completedUrls.join(','),
-              processing_status: i === allUrls.length - 1 ? 'ready' : 'processing'
-            }).eq('id', orderId);
-          }
-        }
-      } catch (e) { console.error(`Page ${i} failed`, e); }
-    }
-  }
-}
-
-async function pollSinglePage(taskId: string): Promise<string | null> {
-  for (let i = 0; i < 60; i++) {
-    await new Promise(r => setTimeout(r, 8000));
-    try {
-      const res = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${taskId}`, {
-        headers: { 'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}` }
-      });
-      const json = await res.json();
-      if (json.data?.status === "completed" && json.data?.outputs?.[0]) return json.data.outputs[0];
-      if (json.data?.status === "failed") return null;
-    } catch (e) { /* retry */ }
-  }
-  return null;
 }
