@@ -5,75 +5,53 @@ import CloudConvert from 'cloudconvert';
 
 const cloudConvert = new CloudConvert(process.env.CLOUDCONVERT_API_KEY!);
 
-// FORCE VERCEL BUILD TRIGGER: v2.1.6-Webhook-Architecture
-const VAULT_ENGINE_VERSION = "2.1.6";
-
 export async function POST(req: Request) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!, 
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-  
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
   let currentOrderId: string = "";
 
   try {
     const body = await req.json();
     currentOrderId = body.orderId;
 
-    if (!currentOrderId) throw new Error("Missing Order ID");
-
     const { data: order } = await supabase.from('translations').select('*').eq('id', currentOrderId).single();
     if (!order) throw new Error('Order not found.');
 
-    // 1. UI Update: Start the pulse immediately
-    await supabase.from('translations').update({ 
-      processing_status: 'processing' 
-    }).eq('id', currentOrderId);
+    await supabase.from('translations').update({ processing_status: 'processing' }).eq('id', currentOrderId);
 
     const originalPath = order.image_url.split('/documents/')[1] || order.image_url.split('/').pop(); 
     const fileExt = originalPath?.split('.').pop()?.toLowerCase();
-    
     let sourcePages: string[] = [];
 
-    // --- STEP 1: CONVERSION (PDF/Docx to JPG) ---
+    // --- CLOUDCONVERT LOGIC ---
     if (['pdf', 'docx', 'doc'].includes(fileExt || "")) {
       const { data: fileBlob } = await supabase.storage.from('documents').download(originalPath!);
-      const fileBuffer = Buffer.from(await fileBlob!.arrayBuffer());
-
       const job = await cloudConvert.jobs.create({
         tasks: {
-          'import-it': { operation: 'import/base64', file: fileBuffer.toString('base64'), filename: `input.${fileExt}` },
-          'convert-it': { operation: 'convert', input: 'import-it', output_format: 'jpg', width: 2200 },
-          'export-it': { operation: 'export/url', input: 'convert-it' }
+          'import': { operation: 'import/base64', file: Buffer.from(await fileBlob!.arrayBuffer()).toString('base64'), filename: `in.${fileExt}` },
+          'convert': { operation: 'convert', input: 'import', output_format: 'jpg', width: 2200 },
+          'export': { operation: 'export/url', input: 'convert' }
         }
       });
-
       const finishedJob = await cloudConvert.jobs.wait(job.id);
-      const exportTask = finishedJob.tasks.find((t: any) => t.name === 'export-it' && t.status === 'finished');
-      
-      if (!exportTask?.result?.files) {
-        throw new Error("CloudConvert conversion failed.");
-      }
-      
-      sourcePages = exportTask.result.files.map((f: any) => f.url);
-    } 
-    // --- STEP 2: IMAGE HANDLING ---
-    else {
-      const { data: signedData } = await supabase.storage.from('documents').createSignedUrl(originalPath!, 900);
-      sourcePages = [signedData?.signedUrl || ""];
+      const exportTask = finishedJob.tasks.find((t: any) => t.name === 'export' && t.status === 'finished');
+      sourcePages = exportTask?.result?.files?.map((f: any) => f.url) || [];
+    } else {
+      const { data: signed } = await supabase.storage.from('documents').createSignedUrl(originalPath!, 900);
+      sourcePages = [signed?.signedUrl || ""];
     }
 
-    // --- STEP 3: WEBHOOK SETUP ---
-    // This dynamically detects your Vercel URL (e.g., https://accucert.vercel.app)
+    // --- THE CRITICAL WEBHOOK FIX ---
     const host = req.headers.get('host');
-    const protocol = host?.includes('localhost') ? 'http' : 'https';
-    const webhookUrl = `${protocol}://${host}/api/webhook-wavespeed?orderId=${currentOrderId}`;
+    // Note: We use encodeURIComponent to ensure the URL is safe for the query string
+    const webhookUrl = encodeURIComponent(`https://${host}/api/webhook-wavespeed?orderId=${currentOrderId}`);
 
-    // --- STEP 4: SUBMIT TO WAVESPEED ---
     for (const pageUrl of sourcePages) {
-      console.log(`🚀 Sending Page to WaveSpeed with Webhook: ${webhookUrl}`);
+      // THE DOCS REQUIRE: POST https://api.../image-translator?webhook=YOUR_URL
+      const apiUrl = `https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator?webhook=${webhookUrl}`;
       
-      const waveRes = await fetch("https://api.wavespeed.ai/api/v3/wavespeed-ai/image-translator", {
+      console.log(`📡 DISPATCHING TO: ${apiUrl}`);
+
+      await fetch(apiUrl, {
         method: 'POST',
         headers: { 
           'Authorization': `Bearer ${process.env.WAVESPEED_API_KEY}`, 
@@ -82,28 +60,15 @@ export async function POST(req: Request) {
         body: JSON.stringify({ 
           image: pageUrl, 
           target_language: "english", 
-          output_format: "jpeg",
-          webhook: webhookUrl // Critical fix: Tells WaveSpeed where to send results
+          output_format: "jpeg" 
         })
       });
-
-      const waveData = await waveRes.json();
-      if (!waveRes.ok) {
-        throw new Error(`WaveSpeed Rejection: ${JSON.stringify(waveData)}`);
-      }
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      engine_version: VAULT_ENGINE_VERSION,
-      webhook_active: webhookUrl 
-    });
+    return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error(`🛑 ENGINE_CRASH [${VAULT_ENGINE_VERSION}]:`, err.message);
-    if (currentOrderId) {
-      await supabase.from('translations').update({ processing_status: 'failed' }).eq('id', currentOrderId);
-    }
+    console.error("APPROVE_FAILURE:", err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 }); 
   }
 }
