@@ -1,103 +1,91 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { Document, Packer, Paragraph, TextRun } from 'docx';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const { orderId, htmlContent, translatedUrls, userEmail, fullName, originalFormat } = await req.json();
+    const { orderId, translatedUrls, userEmail, fullName } = await req.json();
     
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!, 
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // 1. CLEAN TEXT (The fix for "&nbsp;" and "No text detected")
-    const cleanText = htmlContent
-      .replace(/<[^>]*>?/gm, '\n') 
-      .replace(/&nbsp;/g, ' ')      
-      .replace(/\s\s+/g, ' ')       
-      .trim();
-
-    await supabase.from('translations').update({ manual_edits: htmlContent }).eq('id', orderId);
-
     const urlArray = translatedUrls.split(',').filter((url: string) => url.trim() !== "");
-    let attachments: any[] = [];
+    const pdfDoc = await PDFDocument.create();
+    
+    // --- 1. GENERATE THE OFFICIAL COVER PAGE ---
+    const coverPage = pdfDoc.addPage([600, 800]); // Standard A4-ish size
+    const fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    const fontRegular = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    // 2. GENERATE OUTPUT
-    if (originalFormat === 'pdf') {
-      const pdfDoc = await PDFDocument.create();
-      const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-      let page = pdfDoc.addPage([600, 800]);
+    // Header & Branding
+    coverPage.drawText("ACCUCERT GLOBAL", { x: 220, y: 720, size: 20, font: fontBold, color: rgb(0, 0, 0.5) });
+    coverPage.drawLine({ start: { x: 50, y: 700 }, end: { x: 550, y: 700 }, thickness: 2, color: rgb(0, 0, 0) });
+
+    // Document Title
+    coverPage.drawText("CERTIFICATE OF TRANSLATION ACCURACY", { x: 130, y: 650, size: 14, font: fontBold });
+
+    // Client Details
+    coverPage.drawText(`Client Name: ${fullName}`, { x: 70, y: 580, size: 12, font: fontRegular });
+    coverPage.drawText(`Order ID: ${orderId}`, { x: 70, y: 560, size: 12, font: fontRegular });
+    coverPage.drawText(`Date of Issue: ${date}`, { x: 70, y: 540, size: 12, font: fontRegular });
+
+    // Certification Statement (The Legal Part)
+    const statement = `This is to certify that the attached document is a true, accurate, and complete translation of the original document provided. The translation was performed by Accucert Global's proprietary AI reconstruction engine and verified for visual and linguistic fidelity.`;
+    
+    coverPage.drawText("CERTIFICATION STATEMENT:", { x: 70, y: 480, size: 12, font: fontBold });
+    
+    // Simple wrapping for the statement
+    coverPage.drawText(statement, { 
+        x: 70, y: 460, size: 11, font: fontRegular, 
+        maxWidth: 460, lineHeight: 15 
+    });
+
+    // Footer Stamp Placeholder
+    coverPage.drawText("DIGITALLY SIGNED & VERIFIED BY ACCUCERT GLOBAL", { 
+        x: 160, y: 150, size: 10, font: fontBold, color: rgb(0.5, 0.5, 0.5) 
+    });
+    coverPage.drawText("Verification Link: accucert.com/verify", { x: 230, y: 135, size: 8, font: fontRegular });
+
+    // --- 2. APPEND THE AI-RECONSTRUCTED PAGES ---
+    for (const url of urlArray) {
+      const imgRes = await fetch(url.trim());
+      const imgBytes = await imgRes.arrayBuffer();
       
-      page.drawText("CERTIFIED ENGLISH TRANSLATION", { x: 50, y: 750, size: 16, font });
+      const image = await pdfDoc.embedJpg(imgBytes); 
+      const { width, height } = image.scale(1);
       
-      const words = cleanText.split(' ');
-      let currentLine = "";
-      let y = 700;
-
-      // Type safety added to 'word'
-      for (const word of words) {
-        currentLine += word + " ";
-        if (currentLine.length > 80) { 
-          page.drawText(currentLine, { x: 50, y, size: 11, font });
-          currentLine = "";
-          y -= 15;
-          if (y < 50) { 
-            page = pdfDoc.addPage([600, 800]);
-            y = 750;
-          }
-        }
-      }
-      page.drawText(currentLine, { x: 50, y, size: 11, font });
-
-      const pdfBytes = await pdfDoc.save();
-      attachments.push({
-        filename: `Accucert_Certified_${fullName}.pdf`,
-        content: Buffer.from(pdfBytes),
-      });
-    } 
-    else if (originalFormat === 'docx' || originalFormat === 'doc') {
-      const doc = new Document({
-        sections: [{
-          children: [
-            new Paragraph({ children: [new TextRun({ text: "CERTIFIED TRANSLATION", bold: true, size: 32 })] }),
-            // Added : string type here to fix your specific error
-            ...cleanText.split('\n').map((line: string) => new Paragraph({
-              children: [new TextRun({ text: line, size: 24 })]
-            }))
-          ],
-        }],
-      });
-      const docBuffer = await Packer.toBuffer(doc);
-      attachments.push({
-        filename: `Accucert_Certified_${fullName}.docx`,
-        content: docBuffer,
-      });
-    } 
-    else {
-      // JPG Logic - Type safety added to 'url' and 'i'
-      const imageAttachments = await Promise.all(urlArray.map(async (url: string, i: number) => {
-        const res = await fetch(url.trim());
-        const buffer = await res.arrayBuffer();
-        return {
-          filename: `Accucert_Page_${i + 1}.jpg`,
-          content: Buffer.from(buffer),
-        };
-      }));
-      attachments = imageAttachments;
+      // Add each image as its own page following the cover
+      const page = pdfDoc.addPage([width, height]);
+      page.drawImage(image, { x: 0, y: 0, width, height });
     }
 
-    // 3. DISPATCH
+    const pdfBytes = await pdfDoc.save();
+
+    // --- 3. DISPATCH VIA RESEND ---
     const { error: emailError } = await resend.emails.send({
       from: 'Accucert <onboarding@resend.dev>',
       to: userEmail,
       subject: `Official Certified Translation: ${fullName}`,
-      html: `<div style="font-family: serif;"><h2>Translation Finalized</h2><p>Dear ${fullName}, your document is attached.</p></div>`,
-      attachments: attachments,
+      attachments: [{
+        filename: `Accucert_Certified_${fullName}.pdf`,
+        content: Buffer.from(pdfBytes),
+      }],
+      html: `
+        <div style="font-family: serif; padding: 30px; border: 1px solid #eee;">
+          <h2 style="color: #003366;">Translation Completed Successfully</h2>
+          <p>Dear ${fullName},</p>
+          <p>Your official certified translation has been generated. It includes a <strong>Certificate of Accuracy</strong> followed by the reconstructed pages of your original document.</p>
+          <p>Please find the PDF attached to this email.</p>
+          <br/>
+          <p>Best regards,<br/><strong>Accucert Global Management</strong></p>
+        </div>
+      `,
     });
 
     if (emailError) throw new Error(emailError.message);
